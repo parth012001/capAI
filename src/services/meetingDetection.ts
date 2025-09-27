@@ -60,7 +60,12 @@ export class MeetingDetectionService {
       
       // Extract detailed meeting information
       const meetingDetails = await this.extractMeetingDetails(email.body, intent);
-      
+
+      // Check if specific times are mentioned
+      const hasSpecificTimes = this.hasSpecificTimesMentioned(email.body, meetingDetails.preferredDates);
+      console.log(`🔍 [DEBUG] hasSpecificTimes: ${hasSpecificTimes} for email: "${email.body.substring(0, 100)}..."`);
+      console.log(`🔍 [DEBUG] meetingDetails.preferredDates: ${JSON.stringify(meetingDetails.preferredDates)}`);
+
       const meetingRequest: MeetingRequest = {
         // emailId removed - Gmail IDs are strings, not integers
         // This field is optional and will be set by the pipeline if needed
@@ -68,7 +73,7 @@ export class MeetingDetectionService {
         subject: email.subject,
         meetingType: this.determineMeetingType(intent),
         requestedDuration: meetingDetails.duration,
-        preferredDates: meetingDetails.preferredDates,
+        preferredDates: hasSpecificTimes ? meetingDetails.preferredDates : [], // Empty if vague
         attendees: meetingDetails.attendees,
         locationPreference: meetingDetails.location,
         specialRequirements: meetingDetails.specialRequirements,
@@ -711,6 +716,30 @@ Respond with JSON:
     }
     
     return 'medium';
+  }
+
+  // Check if email contains specific times vs vague requests
+  private hasSpecificTimesMentioned(emailBody: string, extractedDates?: string[]): boolean {
+    const bodyLower = emailBody.toLowerCase();
+
+    // Check for explicit time/date tokens in the original email body
+    const hasExplicitTimeTokens =
+      // AM/PM times
+      /\b(am|pm)\b/i.test(bodyLower) ||
+      // Explicit time patterns like "2:30", "10:00" with word boundaries
+      /\b\d{1,2}:\d{2}\b/.test(bodyLower) ||
+      // Weekday names
+      /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(bodyLower) ||
+      // Month names
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(bodyLower) ||
+      // Numeric day tokens like "5th", "21st", "3rd"
+      /\b\d{1,2}(st|nd|rd|th)\b/i.test(bodyLower) ||
+      // Date patterns like "Dec 15" or "15th of December"
+      /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+\d{1,2}\b/i.test(bodyLower) ||
+      /\b\d{1,2}\s+(of\s+)?(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(bodyLower);
+
+    // Return true only if we found explicit time/date indicators
+    return hasExplicitTimeTokens;
   }
 
   // Health check for meeting detection service

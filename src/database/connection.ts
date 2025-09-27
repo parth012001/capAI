@@ -124,6 +124,28 @@ export async function initializeDatabase() {
         if (error.code !== '42P07' && error.code !== '42710') throw error;
       }
       console.log('✅ Database schema initialized (Phase 1-4: Full 24/7 AI Assistant)');
+    }
+
+    // Initialize User Profile Schema (name collection)
+    const userProfileSchemaPath = path.join(__dirname, '../../scripts/database/user_profile_schema.sql');
+    if (fs.existsSync(userProfileSchemaPath)) {
+      const userProfileSchema = fs.readFileSync(userProfileSchemaPath, 'utf8');
+      try {
+        await pool.query(userProfileSchema);
+      } catch (error: any) {
+        if (error.code !== '42P07' && error.code !== '42710') throw error;
+      }
+    }
+
+    // Initialize Scheduling Link Schema
+    const schedulingLinkSchemaPath = path.join(__dirname, '../../scripts/database/scheduling_link_schema.sql');
+    if (fs.existsSync(schedulingLinkSchemaPath)) {
+      const schedulingLinkSchema = fs.readFileSync(schedulingLinkSchemaPath, 'utf8');
+      try {
+        await pool.query(schedulingLinkSchema);
+      } catch (error: any) {
+        if (error.code !== '42P07' && error.code !== '42710') throw error;
+      }
     } else if (fs.existsSync(phase3_3SchemaPath)) {
       console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 + 2.4 + 3 + 3.3 Auto-Scheduling)');
     } else if (fs.existsSync(phase3CalendarSchemaPath)) {

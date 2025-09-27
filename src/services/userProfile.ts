@@ -7,6 +7,9 @@ export interface UserProfile {
   lastName?: string;
   fullName?: string;
   onboardingCompleted: boolean;
+  schedulingLink?: string;
+  schedulingLinkVerified?: boolean;
+  schedulingLinkAddedAt?: Date;
 }
 
 export class UserProfileService {
@@ -22,8 +25,9 @@ export class UserProfileService {
   async getUserProfile(userId: string): Promise<UserProfile | null> {
     try {
       const query = `
-        SELECT user_id, gmail_address, first_name, last_name, full_name, onboarding_completed
-        FROM user_gmail_tokens 
+        SELECT user_id, gmail_address, first_name, last_name, full_name, onboarding_completed,
+               scheduling_link, scheduling_link_verified, scheduling_link_added_at
+        FROM user_gmail_tokens
         WHERE user_id = $1
       `;
       
@@ -40,7 +44,10 @@ export class UserProfileService {
         firstName: row.first_name,
         lastName: row.last_name,
         fullName: row.full_name,
-        onboardingCompleted: row.onboarding_completed
+        onboardingCompleted: row.onboarding_completed,
+        schedulingLink: row.scheduling_link,
+        schedulingLinkVerified: row.scheduling_link_verified,
+        schedulingLinkAddedAt: row.scheduling_link_added_at
       };
     } catch (error) {
       console.error('❌ Error getting user profile:', error);
@@ -78,6 +85,57 @@ export class UserProfileService {
       return profile?.onboardingCompleted === true && !!profile?.firstName;
     } catch (error) {
       console.error('❌ Error checking profile completion:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Update user's scheduling link
+   */
+  async updateSchedulingLink(userId: string, schedulingLink: string, isVerified: boolean = false): Promise<boolean> {
+    try {
+      const query = `
+        UPDATE user_gmail_tokens
+        SET scheduling_link = $2,
+            scheduling_link_verified = $3,
+            scheduling_link_added_at = CASE
+              WHEN scheduling_link IS NULL THEN NOW()
+              ELSE scheduling_link_added_at
+            END,
+            updated_at = NOW()
+        WHERE user_id = $1
+      `;
+
+      const result = await this.pool.query(query, [userId, schedulingLink, isVerified]);
+      return result.rowCount !== null && result.rowCount > 0;
+    } catch (error) {
+      console.error('❌ Error updating scheduling link:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get user's scheduling link if available
+   */
+  async getSchedulingLink(userId: string): Promise<string | null> {
+    try {
+      const profile = await this.getUserProfile(userId);
+      return profile?.schedulingLink || null;
+    } catch (error) {
+      console.error('❌ Error getting scheduling link:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Check if user has a verified scheduling link
+   */
+  async hasVerifiedSchedulingLink(userId: string): Promise<boolean> {
+    try {
+      const profile = await this.getUserProfile(userId);
+      return !!(profile?.schedulingLink && profile?.schedulingLinkVerified);
+    } catch (error) {
+      console.error('❌ Error checking verified scheduling link:', error);
       return false;
     }
   }

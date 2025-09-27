@@ -5,12 +5,14 @@ import { GmailService } from './gmail';
 import { SmartAvailabilityService } from './smartAvailability';
 import { pool } from '../database/connection';
 import { safeParseDate, safeParseDateWithValidation } from '../utils/dateParser';
+import { UserProfileService } from './userProfile';
 
 export interface MeetingTimeSlot {
   start: string;
   end: string;
   formatted: string;
   confidence: number;
+  reason?: string;
 }
 
 export interface MeetingResponseContext {
@@ -25,7 +27,7 @@ export interface MeetingResponseContext {
 export interface MeetingResponse {
   shouldRespond: boolean;
   responseText: string;
-  actionTaken: 'accepted' | 'declined' | 'suggested_alternatives' | 'requested_more_info';
+  actionTaken: 'accepted' | 'declined' | 'suggested_alternatives' | 'requested_more_info' | 'suggested_scheduling_link_conflict' | 'suggested_scheduling_link_vague';
   calendarEventCreated?: boolean;
   calendarEventId?: string | null;
   confidenceScore: number;
@@ -43,11 +45,13 @@ export class MeetingResponseGeneratorService {
   private calendarService: CalendarService;
   private gmailService: GmailService;
   private smartAvailabilityService: SmartAvailabilityService;
+  private userProfileService: UserProfileService;
 
   constructor() {
     this.calendarService = new CalendarService();
     this.gmailService = new GmailService();
     this.smartAvailabilityService = new SmartAvailabilityService(this.calendarService);
+    this.userProfileService = new UserProfileService(pool);
   }
 
   /**
@@ -192,72 +196,40 @@ Looking forward to speaking with you!`;
       // Get user communication tone from database
       const userTone = await this.getUserCommunicationTone(userId);
       
-      // Check calendar availability and generate smart suggestions
-      let isAvailable = true;
+      // Check calendar availability first, then generate alternatives only if needed
+      let isAvailable = false;
       let suggestedTimes: MeetingTimeSlot[] = [];
-      
+
       const duration = meetingRequest.requestedDuration || 60;
       const preferredDate = meetingRequest.preferredDates?.[0];
-      
-      // Always generate smart time slot suggestions for 9-5 PST business days
-      try {
-        const smartSuggestions = await this.smartAvailabilityService.generateTimeSlotSuggestions(
-          {
-            duration: duration,
-            preferredDate: preferredDate,
-            maxSuggestions: 3,
-            excludeWeekends: true
-          },
-          userId
-        );
-        
-        // Convert smart suggestions to our format
-        suggestedTimes = smartSuggestions.map(slot => ({
-          start: slot.start,
-          end: slot.end,
-          formatted: this.smartAvailabilityService.formatTimeSlot(slot),
-          confidence: slot.confidence,
-          reason: slot.reason
-        }));
-        
-        // Check if the preferred time is available (with robust date parsing)
-        if (preferredDate) {
-          const dateParseResult = safeParseDateWithValidation(preferredDate);
-          if (dateParseResult.isValid && dateParseResult.date) {
-            console.log(`📅 Parsed preferred date: ${preferredDate} → ${dateParseResult.date.toISOString()} (confidence: ${dateParseResult.confidence}%)`);
-            const endTime = new Date(dateParseResult.date.getTime() + (duration * 60 * 1000));
+
+      // First check if the preferred time is available (with robust date parsing)
+      if (preferredDate) {
+        const dateParseResult = safeParseDateWithValidation(preferredDate);
+        if (dateParseResult.isValid && dateParseResult.date) {
+          console.log(`📅 Parsed preferred date: ${preferredDate} → ${dateParseResult.date.toISOString()} (confidence: ${dateParseResult.confidence}%)`);
+          const endTime = new Date(dateParseResult.date.getTime() + (duration * 60 * 1000));
+          try {
             const availability = await this.calendarService.checkAvailability(
               dateParseResult.date.toISOString(),
               endTime.toISOString()
             );
             isAvailable = availability.isAvailable;
-          } else {
-            console.warn(`⚠️ [DATE PARSING] Could not parse preferred date: "${preferredDate}" - ${dateParseResult.errorMessage}`);
-            isAvailable = false; // Treat unparseable dates as unavailable
+            console.log(`📅 Availability check: ${isAvailable ? '✅ Available' : '❌ Conflict found'} for ${preferredDate}`);
+          } catch (availabilityError) {
+            console.error('❌ Error checking availability:', availabilityError);
+            isAvailable = false; // Treat availability check errors as unavailable
           }
-        }
-        
-        console.log(`📅 Generated ${suggestedTimes.length} smart time slot suggestions`);
-        
-      } catch (error) {
-        console.error('❌ Error generating smart availability suggestions:', error);
-        // Fallback to basic availability check (with robust date parsing)
-        if (preferredDate) {
-          const dateParseResult = safeParseDateWithValidation(preferredDate);
-          if (dateParseResult.isValid && dateParseResult.date) {
-            console.log(`📅 [FALLBACK] Parsed preferred date: ${preferredDate} → ${dateParseResult.date.toISOString()}`);
-            const endTime = new Date(dateParseResult.date.getTime() + (duration * 60 * 1000));
-            const availability = await this.calendarService.checkAvailability(
-              dateParseResult.date.toISOString(),
-              endTime.toISOString()
-            );
-            isAvailable = availability.isAvailable;
-          } else {
-            console.warn(`⚠️ [FALLBACK DATE PARSING] Could not parse preferred date: "${preferredDate}" - ${dateParseResult.errorMessage}`);
-            isAvailable = false; // Treat unparseable dates as unavailable
-          }
+        } else {
+          console.warn(`⚠️ [DATE PARSING] Could not parse preferred date: "${preferredDate}" - ${dateParseResult.errorMessage}`);
+          isAvailable = false; // Treat unparseable dates as unavailable
         }
       }
+
+      // Don't generate alternative time suggestions in context - let response generator handle it
+      // This prevents conflicts from being routed to alternative times instead of Calendly link
+      console.log(`📅 Context building: ${!isAvailable && preferredDate ? 'Conflict detected' : 'Available or no specific time'} - delegating to response generator`);
+      suggestedTimes = []; // Always empty - response generator will handle alternatives if needed
 
       return {
         senderRelationship: senderHistory.classification,
@@ -291,14 +263,26 @@ Looking forward to speaking with you!`;
     userId: string
   ): Promise<MeetingResponse> {
     try {
+      console.log(`🔍 [RESPONSE DEBUG] context.isAvailable: ${context.isAvailable}`);
+      console.log(`🔍 [RESPONSE DEBUG] meetingRequest.preferredDates: ${JSON.stringify(meetingRequest.preferredDates)}`);
+      console.log(`🔍 [RESPONSE DEBUG] context.suggestedTimes: ${JSON.stringify(context.suggestedTimes)}`);
+
+      // Check for specific times first
       if (context.isAvailable && meetingRequest.preferredDates && meetingRequest.preferredDates.length > 0) {
-        // Accept the meeting
+        console.log(`🔍 [RESPONSE DEBUG] Taking path: generateAcceptanceResponse`);
+        // Accept the meeting with specific time
         return await this.generateAcceptanceResponse(email, meetingRequest, context, userId);
-      } else if (context.suggestedTimes && context.suggestedTimes.length > 0) {
-        // Suggest alternative times
-        return await this.generateAlternativeTimesResponse(email, meetingRequest, context);
+      } else if (!context.isAvailable && meetingRequest.preferredDates && meetingRequest.preferredDates.length > 0) {
+        console.log(`🔍 [RESPONSE DEBUG] Taking path: generateConflictResponse (CALENDLY for conflicts)`);
+        // Conflict with specific time - use scheduling link instead of alternatives
+        return await this.generateConflictResponse(email, meetingRequest, context, userId);
+      } else if (!meetingRequest.preferredDates || meetingRequest.preferredDates.length === 0) {
+        console.log(`🔍 [RESPONSE DEBUG] Taking path: generateVagueTimeResponse (CALENDLY for vague)`);
+        // No specific time mentioned - check for scheduling link
+        return await this.generateVagueTimeResponse(email, meetingRequest, context, userId);
       } else {
-        // Request more information
+        console.log(`🔍 [RESPONSE DEBUG] Taking path: generateMoreInfoResponse (fallback)`);
+        // Request more information as final fallback
         return await this.generateMoreInfoResponse(email, meetingRequest, context);
       }
     } catch (error) {
@@ -337,8 +321,8 @@ Looking forward to speaking with you!`;
       // Format time for response
       const timeFormatted = this.formatDateTime(requestedDate);
       
-      // Generate personalized response text
-      const responseText = this.generateAcceptanceText(meetingRequest, context, timeFormatted);
+      // Generate personalized response text (we'll update it after calendar event attempt)
+      let responseText = this.generateAcceptanceText(meetingRequest, context, timeFormatted, false);
 
       // NEW: AUTO-BOOK CALENDAR EVENT (but don't send email yet - user approval required)
       let calendarEventId: string | null = null;
@@ -374,14 +358,17 @@ Looking forward to speaking with you!`;
         console.log(`✅ [AUTO-BOOKING] Calendar event created successfully: ${calendarEventId}`);
         console.log(`📋 [AUTO-BOOKING] Event details: ${timeFormatted} with ${meetingRequest.senderEmail}`);
         console.log(`⏳ [AUTO-BOOKING] Event status: TENTATIVE (will be confirmed when user sends email)`);
-        
+
       } catch (calendarError) {
         console.error(`❌ [AUTO-BOOKING] Failed to create calendar event:`, calendarError);
-        
+
         // Don't fail the whole response if calendar booking fails
         // User can still approve the draft and we'll handle booking later
         console.log(`⚠️ [AUTO-BOOKING] Continuing with draft creation despite calendar error`);
       }
+
+      // Regenerate response text with correct calendar event status
+      responseText = this.generateAcceptanceText(meetingRequest, context, timeFormatted, calendarEventCreated);
 
       return {
         shouldRespond: true,
@@ -424,6 +411,127 @@ Looking forward to speaking with you!`;
       calendarEventCreated: false,
       confidenceScore: 85
     };
+  }
+
+  /**
+   * Generate response for scheduling conflicts (specific time unavailable)
+   */
+  private async generateConflictResponse(
+    email: ParsedEmail,
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    userId: string
+  ): Promise<MeetingResponse> {
+    try {
+      const userProfileService = this.userProfileService;
+      const schedulingLink = await userProfileService.getSchedulingLink(userId);
+
+      if (schedulingLink) {
+        // User has scheduling link - use it
+        const greeting = this.getGreeting(context.senderRelationship, context.userTone);
+        const closing = this.getClosing(context.userTone);
+        const timeFormatted = this.formatDateTime(new Date(meetingRequest.preferredDates![0]));
+
+        const responseText = `${greeting}
+
+Thank you for reaching out! Unfortunately, I have a conflict at ${timeFormatted}.
+
+However, I'd be happy to meet with you! Please feel free to book a time that works for both of us using my scheduling link:
+
+${schedulingLink}
+
+${closing}`;
+
+        return {
+          shouldRespond: true,
+          responseText,
+          actionTaken: 'suggested_scheduling_link_conflict',
+          confidenceScore: 90,
+          calendarEventCreated: false
+        };
+      } else {
+        // No scheduling link - generate alternative time suggestions
+        console.log(`⚠️ No scheduling link found, generating alternative times for conflict`);
+
+        // Generate alternative times since we don't have scheduling link
+        const duration = meetingRequest.requestedDuration || 60;
+        const preferredDate = meetingRequest.preferredDates![0];
+
+        try {
+          console.log(`🔄 Generating alternative time suggestions due to conflict (no scheduling link)`);
+          const smartSuggestions = await this.smartAvailabilityService.generateTimeSlotSuggestions(
+            {
+              duration: duration,
+              preferredDate: preferredDate,
+              maxSuggestions: 3,
+              excludeWeekends: true
+            },
+            userId
+          );
+
+          // Convert smart suggestions to our format and add to context
+          const suggestedTimes = smartSuggestions.map(slot => ({
+            start: slot.start,
+            end: slot.end,
+            formatted: this.smartAvailabilityService.formatTimeSlot(slot),
+            confidence: slot.confidence,
+            reason: slot.reason
+          }));
+
+          console.log(`📅 Generated ${suggestedTimes.length} alternative time suggestions for conflict fallback`);
+
+          // Update context with generated suggestions
+          const updatedContext = { ...context, suggestedTimes };
+          return await this.generateAlternativeTimesResponse(email, meetingRequest, updatedContext);
+
+        } catch (error) {
+          console.error('❌ Error generating alternative time suggestions for conflict:', error);
+          // Fall back to more info request if we can't generate alternatives
+          return await this.generateMoreInfoResponse(email, meetingRequest, context);
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error generating conflict response:', error);
+      // Fall back to more info request on error
+      return await this.generateMoreInfoResponse(email, meetingRequest, context);
+    }
+  }
+
+  /**
+   * Generate response for vague time requests (e.g., "quick chat", "catch up")
+   */
+  private async generateVagueTimeResponse(
+    email: ParsedEmail,
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    userId: string
+  ): Promise<MeetingResponse> {
+    console.log(`📅 [VAGUE TIME] Handling vague meeting request from ${meetingRequest.senderEmail}`);
+
+    // Check if user has a scheduling link
+    const schedulingLink = await this.userProfileService.getSchedulingLink(userId);
+
+    if (schedulingLink) {
+      console.log(`🔗 [SCHEDULING LINK] Found scheduling link for user, using link response`);
+      const responseText = this.generateSchedulingLinkText(meetingRequest, context, schedulingLink);
+      return {
+        shouldRespond: true,
+        responseText,
+        actionTaken: 'suggested_scheduling_link_vague',
+        calendarEventCreated: false,
+        confidenceScore: 90
+      };
+    } else {
+      console.log(`⏰ [TIME REQUEST] No scheduling link, requesting specific times`);
+      const responseText = this.generateTimeRequestText(meetingRequest, context);
+      return {
+        shouldRespond: true,
+        responseText,
+        actionTaken: 'requested_more_info',
+        calendarEventCreated: false,
+        confidenceScore: 85
+      };
+    }
   }
 
   /**
@@ -485,13 +593,14 @@ Looking forward to speaking with you!`;
   private generateAcceptanceText(
     meetingRequest: MeetingRequest,
     context: MeetingResponseContext,
-    timeFormatted: string
+    timeFormatted: string,
+    calendarEventCreated: boolean = false
   ): string {
     const greeting = this.getGreeting(context.senderRelationship, context.userTone);
-    const confirmation = this.getConfirmation(context.userTone, timeFormatted);
+    const confirmation = this.getConfirmation(context.userTone, timeFormatted, calendarEventCreated);
     const closing = this.getClosing(context.userTone);
 
-    // Include smart time suggestions even for acceptance
+    // Only include additional time suggestions if they exist (they shouldn't for clean acceptance)
     let timeSuggestions = '';
     if (context.suggestedTimes && context.suggestedTimes.length > 0) {
       timeSuggestions = `
@@ -534,6 +643,85 @@ ${closing}`;
   }
 
   /**
+   * Generate scheduling link response text
+   */
+  private generateSchedulingLinkText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    schedulingLink: string
+  ): string {
+    const greeting = this.getGreeting(context.senderRelationship, context.userTone);
+    const closing = this.getClosing(context.userTone);
+
+    const meetingPurpose = (meetingRequest.subject || 'our meeting')
+      .toLowerCase()
+      .replace(/^(re:|fwd:|meeting request:?)/i, '')
+      .trim();
+
+    if (context.userTone === 'casual') {
+      return `${greeting}
+
+I'd love to ${meetingPurpose === 'our meeting' ? 'catch up' : meetingPurpose}! Feel free to book a time that works for you:
+
+${schedulingLink}
+
+${closing}`;
+    } else if (context.userTone === 'friendly') {
+      return `${greeting}
+
+I'd be happy to meet regarding ${meetingPurpose}! Please feel free to schedule a time that's convenient for you:
+
+${schedulingLink}
+
+${closing}`;
+    } else {
+      return `${greeting}
+
+Thank you for reaching out regarding ${meetingPurpose}. Please schedule a meeting at your convenience using the following link:
+
+${schedulingLink}
+
+${closing}`;
+    }
+  }
+
+  /**
+   * Generate time request response text (when no scheduling link available)
+   */
+  private generateTimeRequestText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext
+  ): string {
+    const greeting = this.getGreeting(context.senderRelationship, context.userTone);
+    const closing = this.getClosing(context.userTone);
+
+    const meetingPurpose = (meetingRequest.subject || 'our meeting')
+      .toLowerCase()
+      .replace(/^(re:|fwd:|meeting request:?)/i, '')
+      .trim();
+
+    if (context.userTone === 'casual') {
+      return `${greeting}
+
+I'd love to ${meetingPurpose === 'our meeting' ? 'catch up' : meetingPurpose}! What times work best for you? I'm generally available during business hours and can do ${meetingRequest.requestedDuration || 30} minutes.
+
+${closing}`;
+    } else if (context.userTone === 'friendly') {
+      return `${greeting}
+
+I'd be happy to meet regarding ${meetingPurpose}! Could you suggest a few time options that work for you? I'm available during business hours and can accommodate ${meetingRequest.requestedDuration || 30} minutes.
+
+${closing}`;
+    } else {
+      return `${greeting}
+
+Thank you for your interest in meeting regarding ${meetingPurpose}. Could you please provide a few preferred time options? I am generally available during business hours and can accommodate meetings of ${meetingRequest.requestedDuration || 60} minutes.
+
+${closing}`;
+    }
+  }
+
+  /**
    * Generate more info request text
    */
   private generateMoreInfoText(
@@ -566,15 +754,24 @@ ${closing}`;
   }
 
   /**
-   * Get confirmation text based on tone
+   * Get confirmation text based on tone and calendar event creation success
    */
-  private getConfirmation(tone: string, timeFormatted: string): string {
+  private getConfirmation(tone: string, timeFormatted: string, calendarEventCreated: boolean = false): string {
     if (tone === 'casual') {
-      return `Perfect! I'm available at ${timeFormatted} and would love to meet.`;
+      const calendarText = calendarEventCreated
+        ? "I've created a calendar event for our meeting."
+        : "I'll send you calendar details shortly.";
+      return `Perfect! I'm available at ${timeFormatted} and would love to meet. ${calendarText}`;
     } else if (tone === 'friendly') {
-      return `That sounds great! I'm available at ${timeFormatted} and look forward to our meeting.`;
+      const calendarText = calendarEventCreated
+        ? "I've added this to my calendar."
+        : "I will follow up with calendar details.";
+      return `That sounds great! I'm available at ${timeFormatted} and look forward to our meeting. ${calendarText}`;
     } else {
-      return `Thank you for reaching out. I confirm my availability for ${timeFormatted}.`;
+      const calendarText = calendarEventCreated
+        ? "I have created a calendar event for our meeting."
+        : "I will follow up with calendar details.";
+      return `Thank you for reaching out. I confirm my availability for ${timeFormatted}. ${calendarText}`;
     }
   }
 

@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { SchedulingLinkModal } from '../SchedulingLinkModal';
 
 export function ProfileButton() {
   const [isOpen, setIsOpen] = useState(false);
+  const [isSchedulingModalOpen, setIsSchedulingModalOpen] = useState(false);
   const { signOut } = useAuth();
   const navigate = useNavigate();
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -32,6 +34,11 @@ export function ProfileButton() {
     setIsOpen(false);
   };
 
+  const handleSchedulingLink = () => {
+    setIsSchedulingModalOpen(true);
+    setIsOpen(false);
+  };
+
   return (
     <div className="relative" ref={dropdownRef}>
       {/* Profile Button */}
@@ -49,6 +56,28 @@ export function ProfileButton() {
       {isOpen && (
         <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-50">
           <div className="py-1" role="menu" aria-orientation="vertical">
+            <button
+              onClick={handleSchedulingLink}
+              className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 transition-colors"
+              role="menuitem"
+            >
+              <span className="flex items-center">
+                <svg
+                  className="w-4 h-4 mr-3 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M8 7V3a2 2 0 012-2h4a2 2 0 012 2v4M8 7h8M8 7l-2 9m2-9h8m0 0l2 9M8 16l2 9m8-9l-2 9"
+                  />
+                </svg>
+                Scheduling Link
+              </span>
+            </button>
             <button
               onClick={handleSystemStatus}
               className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 transition-colors"
@@ -96,6 +125,12 @@ export function ProfileButton() {
           </div>
         </div>
       )}
+
+      {/* Scheduling Link Modal */}
+      <SchedulingLinkModal
+        isOpen={isSchedulingModalOpen}
+        onClose={() => setIsSchedulingModalOpen(false)}
+      />
     </div>
   );
 }
