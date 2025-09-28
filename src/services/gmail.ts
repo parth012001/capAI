@@ -3,6 +3,7 @@ import { OAuth2Client } from 'google-auth-library';
 import dotenv from 'dotenv';
 import { EmailMessage, ParsedEmail } from '../types';
 import { TokenStorageService } from './tokenStorage';
+import { cleanSubjectLine, encodeEmailHeader } from '../utils/textEncoding';
 
 dotenv.config();
 
@@ -526,7 +527,7 @@ export class GmailService {
     return {
       id: emailData.id,
       threadId: emailData.threadId,
-      subject: getHeader('Subject'),
+      subject: cleanSubjectLine(getHeader('Subject')),
       from: getHeader('From'),
       to: getHeader('To'),
       date: new Date(parseInt(emailData.internalDate)),
@@ -844,8 +845,11 @@ export class GmailService {
   async sendEmailForUser(userId: string, to: string, subject: string, body: string, threadId?: string): Promise<{ messageId: string; threadId: string }> {
     // Ensure we're initialized for the correct user
     this.ensureCorrectUserContext(userId);
-    
-    return this.sendEmail(to, subject, body, threadId);
+
+    // Clean subject line to fix encoding issues
+    const cleanedSubject = cleanSubjectLine(subject);
+
+    return this.sendEmail(to, cleanedSubject, body, threadId);
   }
 
   async sendEmail(to: string, subject: string, body: string, threadId?: string): Promise<{ messageId: string; threadId: string }> {
@@ -917,7 +921,7 @@ export class GmailService {
     // Email headers
     message += `To: ${to}\r\n`;
     message += `From: ${fromEmail}\r\n`;
-    message += `Subject: ${subject}\r\n`;
+    message += `Subject: ${encodeEmailHeader(subject)}\r\n`;
     message += `Date: ${date}\r\n`;
     message += `MIME-Version: 1.0\r\n`;
     message += `Content-Type: multipart/alternative; boundary="${boundary}"\r\n`;
