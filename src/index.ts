@@ -1283,6 +1283,7 @@ app.post('/auto-drafts/:id/send', authMiddleware.authenticate, async (req, res) 
     await gmailService.initializeForUser(userId);
 
     // Send email via Gmail API with user context validation
+    console.log(`🧵 [THREADING DEBUG] About to send email with threadId: ${draftWithEmail.original_thread_id ? draftWithEmail.original_thread_id : 'NULL/UNDEFINED'}`);
     const sendResult = await gmailService.sendEmailForUser(
       userId,
       draftWithEmail.original_from, // Send to the original sender (reply)

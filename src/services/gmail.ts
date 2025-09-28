@@ -856,11 +856,13 @@ export class GmailService {
     try {
       console.log(`📤 Sending email to: ${to}`);
       console.log(`📝 Subject: ${subject}`);
+      console.log(`🧵 [THREADING DEBUG] ThreadId received: ${threadId ? threadId : 'NULL/UNDEFINED'}`);
       
       // Create email message in RFC 2822 format
       const message = this.createEmailMessage(to, subject, body, threadId);
       
       // Send the email
+      console.log(`🧵 [THREADING DEBUG] Sending to Gmail API with threadId: ${threadId ? threadId : 'undefined'}`);
       const response = await this.gmail.users.messages.send({
         userId: 'me',
         requestBody: {
@@ -871,10 +873,11 @@ export class GmailService {
 
       const messageId = response.data.id;
       const responseThreadId = response.data.threadId;
-      
+
       console.log(`✅ Email sent successfully!`);
       console.log(`📧 Message ID: ${messageId}`);
       console.log(`🧵 Thread ID: ${responseThreadId}`);
+      console.log(`🧵 [THREADING DEBUG] Original threadId: ${threadId ? threadId : 'undefined'} → Response threadId: ${responseThreadId}`);
       
       return {
         messageId,
@@ -926,9 +929,17 @@ export class GmailService {
     message += `MIME-Version: 1.0\r\n`;
     message += `Content-Type: multipart/alternative; boundary="${boundary}"\r\n`;
     
+    // Add Message-ID for proper email identification
+    const messageId = `<${Date.now()}-${Math.random().toString(36).substring(2)}@chief-ai.com>`;
+    message += `Message-ID: ${messageId}\r\n`;
+
+    // Add basic threading headers for maximum compatibility (keeping them minimal)
     if (threadId) {
-      message += `In-Reply-To: <${threadId}@gmail.com>\r\n`;
-      message += `References: <${threadId}@gmail.com>\r\n`;
+      console.log(`🧵 [THREADING DEBUG] Using Gmail API threadId + basic headers: ${threadId}`);
+      // Add minimal headers to ensure threading works across all email clients
+      // Using threadId format that's more compatible with email standards
+      message += `In-Reply-To: <${threadId}.gmail@googlemail.com>\r\n`;
+      message += `References: <${threadId}.gmail@googlemail.com>\r\n`;
     }
     
     message += `\r\n`;
