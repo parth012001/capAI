@@ -1,7 +1,7 @@
 import { AIService } from './ai';
 import { MeetingRequest } from './meetingDetection';
 import { ParsedEmail } from '../types';
-import { MeetingResponseContext } from './meetingResponseGenerator';
+import type { MeetingResponseContext } from './meetingResponseGenerator';
 
 export interface AIContentRequest {
   action: 'accept' | 'conflict_calendly' | 'vague_calendly' | 'alternatives' | 'more_info';
@@ -43,13 +43,14 @@ export class MeetingAIContentService {
       const systemPrompt = this.buildSystemPrompt(request);
       const userPrompt = this.buildUserPrompt(request);
 
-      // Generate AI response
+      // Generate AI response with JSON format
       const aiResponse = await this.aiService.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
         ],
+        response_format: { type: "json_object" },
         temperature: 0.7,
         max_tokens: 400
       });
@@ -60,16 +61,20 @@ export class MeetingAIContentService {
         throw new Error('AI generated content too short or empty');
       }
 
-      // Basic safety validation
-      const validation = this.validateAIContent(generatedContent, request);
+      // Parse JSON response
+      const parsedResponse = await this.parseAndValidateJsonResponse(generatedContent, request);
+
+      // Basic safety validation on the email body
+      const validation = this.validateAIContent(parsedResponse.emailBody, request);
       if (!validation.isValid) {
         throw new Error(`AI content validation failed: ${validation.reason}`);
       }
 
-      console.log(`✅ [AI CONTENT] Generated ${generatedContent.length} character response`);
+      console.log(`✅ [AI CONTENT] Generated ${parsedResponse.emailBody.length} character response`);
+      console.log(`📊 [AI CONTENT] Confidence: ${parsedResponse.confidence}, Reasoning: ${parsedResponse.reasoning}`);
 
       return {
-        responseText: generatedContent.trim(),
+        responseText: parsedResponse.emailBody.trim(),
         confidence: 85,
         aiGenerated: true,
         fallbackUsed: false
@@ -147,7 +152,16 @@ export class MeetingAIContentService {
 - Reference specific details from their email when relevant
 - Sound natural and human
 - Don't use overly formal business language
-- Match their communication energy level`;
+- Match their communication energy level
+
+OUTPUT FORMAT: You MUST respond with valid JSON in this exact format:
+{
+  "emailBody": "complete email body response (do not include subject line)",
+  "reasoning": "brief explanation of your response approach",
+  "confidence": "your confidence level in this response (high/medium/low)"
+}
+
+CRITICAL: Generate ONLY the email body content in the emailBody field. Do NOT include or reference the subject line in the email body.`;
 
     return basePrompt;
   }
@@ -158,12 +172,12 @@ export class MeetingAIContentService {
   private buildUserPrompt(request: AIContentRequest): string {
     const { meetingRequest, email, action, timeFormatted, schedulingLink, suggestedTimes } = request;
 
-    let prompt = `Meeting Request Email:
-FROM: ${meetingRequest.senderEmail}
-SUBJECT: ${email.subject}
-BODY: ${email.body}
+    let prompt = `MEETING REQUEST CONTEXT (for understanding only):
+From: ${meetingRequest.senderEmail}
+Subject: ${email.subject}
+Email Body: ${email.body}
 
-Meeting Details Detected:
+MEETING DETAILS DETECTED:
 - Purpose: ${meetingRequest.subject || 'General meeting'}
 - Requested Duration: ${meetingRequest.requestedDuration || 60} minutes
 `;
@@ -214,7 +228,7 @@ ${suggestedTimes.map((time, i) => `  ${i + 1}. ${time.formatted}`).join('\n')}`;
         break;
     }
 
-    prompt += `\n\nGenerate a natural, professional meeting response that matches the context above.`;
+    prompt += `\n\nGenerate a natural, professional meeting response in JSON format. The emailBody should contain only the email body content without any subject line references.`;
 
     return prompt;
   }
@@ -261,6 +275,97 @@ ${suggestedTimes.map((time, i) => `  ${i + 1}. ${time.formatted}`).join('\n')}`;
     }
 
     return { isValid: true };
+  }
+
+  /**
+   * Parse and validate JSON response from AI
+   */
+  private async parseAndValidateJsonResponse(
+    generatedContent: string,
+    request: AIContentRequest
+  ): Promise<{ emailBody: string; reasoning: string; confidence: string }> {
+    try {
+      console.log('🔍 [AI CONTENT] Parsing AI response as JSON...');
+
+      // Parse JSON response
+      const parsed = JSON.parse(generatedContent);
+
+      // Validate required fields
+      if (!parsed.emailBody) {
+        throw new Error('Missing required field: emailBody');
+      }
+
+      // Ensure emailBody is not empty and reasonable
+      if (typeof parsed.emailBody !== 'string' || parsed.emailBody.trim().length < 10) {
+        throw new Error('Invalid emailBody: too short or not a string');
+      }
+
+      // Basic subject line contamination check
+      const emailSubject = request.email.subject.toLowerCase();
+      const emailBodyLower = parsed.emailBody.toLowerCase();
+
+      // Check if the email body starts with or contains the subject line
+      if (emailBodyLower.includes(emailSubject) && emailSubject.length > 5) {
+        console.warn('⚠️ [AI CONTENT] Possible subject line contamination detected, but proceeding');
+        // Don't throw error - let it through but log warning
+      }
+
+      const result = {
+        emailBody: parsed.emailBody.trim(),
+        reasoning: parsed.reasoning || 'No reasoning provided',
+        confidence: parsed.confidence || 'medium'
+      };
+
+      console.log('✅ [AI CONTENT] JSON response parsed successfully');
+      return result;
+
+    } catch (error) {
+      console.error('❌ [AI CONTENT] Failed to parse JSON response:', error);
+      console.log('Raw AI response:', generatedContent);
+
+      // Fallback: try to extract plain text as emailBody
+      const fallbackBody = this.extractFallbackEmailBody(generatedContent);
+
+      return {
+        emailBody: fallbackBody,
+        reasoning: 'Fallback parsing used due to JSON parse error',
+        confidence: 'low'
+      };
+    }
+  }
+
+  /**
+   * Extract email body from plain text response as fallback
+   */
+  private extractFallbackEmailBody(content: string): string {
+    console.log('🔄 [AI CONTENT] Using fallback text extraction...');
+
+    // Clean up common JSON parsing artifacts
+    let cleanContent = content
+      .replace(/^```json\s*/i, '')  // Remove markdown json blocks
+      .replace(/\s*```$/i, '')
+      .replace(/^{.*?"emailBody":\s*"/i, '')  // Remove partial JSON
+      .replace(/".*}$/i, '')
+      .trim();
+
+    // If still looks like JSON, try to extract the value
+    if (cleanContent.startsWith('"') && cleanContent.endsWith('"')) {
+      cleanContent = cleanContent.slice(1, -1);
+    }
+
+    // Basic cleanup
+    cleanContent = cleanContent
+      .replace(/\\n/g, '\n')        // Unescape newlines
+      .replace(/\\"/g, '"')         // Unescape quotes
+      .trim();
+
+    // Ensure minimum length
+    if (cleanContent.length < 10) {
+      cleanContent = "Thank you for your email. I'll review the details and get back to you soon.";
+    }
+
+    console.log(`🔄 [AI CONTENT] Fallback extraction produced ${cleanContent.length} character response`);
+    return cleanContent;
   }
 
   /**

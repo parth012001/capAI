@@ -439,7 +439,14 @@ Looking forward to speaking with you!`;
 
       if (schedulingLink) {
         // User has scheduling link - use AI-enhanced response
-        const timeFormatted = this.formatDateTime(new Date(meetingRequest.preferredDates![0]));
+        const dateParseResult = safeParseDateWithValidation(meetingRequest.preferredDates![0]);
+        if (!dateParseResult.isValid || !dateParseResult.date) {
+          console.error(`❌ Cannot format time for conflict response - invalid date: "${meetingRequest.preferredDates![0]}" - ${dateParseResult.errorMessage}`);
+          // Fallback to more info request if we can't parse the date
+          return await this.generateMoreInfoResponse(email, meetingRequest, context);
+        }
+
+        const timeFormatted = this.formatDateTime(dateParseResult.date);
 
         // Generate AI-enhanced conflict response with scheduling link
         const responseText = await this.generateConflictResponseText(
