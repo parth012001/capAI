@@ -128,36 +128,65 @@ export class MeetingAIContentService {
         basePrompt += `This is a business contact - maintain professional courtesy. `;
     }
 
-    // Add action-specific guidance
+    // Add action-specific guidance with human tone
     switch (action) {
       case 'accept':
-        basePrompt += `You are ACCEPTING their meeting request. Confirm the time enthusiastically and reference the meeting purpose if mentioned.`;
+        basePrompt += `You are ACCEPTING their meeting request. Show genuine enthusiasm! Confirm the time in a natural way and reference what you'll be discussing if they mentioned it. Match their excitement level - if they seem eager, be eager back!`;
         break;
       case 'conflict_calendly':
-        basePrompt += `You have a CONFLICT with their suggested time. Politely decline the specific time but offer your scheduling link as an alternative.`;
+        basePrompt += `You have a CONFLICT with their suggested time. Be genuinely apologetic but positive. Acknowledge their specific time, explain you're not available, then offer your scheduling link as a helpful alternative. Keep it friendly and solution-focused.`;
         break;
       case 'vague_calendly':
-        basePrompt += `They made a VAGUE meeting request without specific time. Respond positively and offer your scheduling link for them to book.`;
+        basePrompt += `They want to meet but didn't suggest a specific time. Show you're interested and make it easy for them by offering your scheduling link. Be welcoming and mention you're looking forward to connecting.`;
         break;
       case 'alternatives':
-        basePrompt += `You have a CONFLICT with their time. Suggest specific alternative times provided.`;
+        basePrompt += `You have a CONFLICT with their suggested time. Be apologetic about the conflict, then suggest the alternative times in a friendly way. Present the options clearly and ask which works best for them.`;
         break;
       case 'more_info':
-        basePrompt += `Their request needs MORE INFORMATION. Ask for clarification on timing while showing interest.`;
+        basePrompt += `Their request needs MORE INFORMATION about timing. Show interest in meeting while asking for clarification. Be helpful and suggest what information would be useful (specific times, duration, etc.).`;
         break;
     }
 
-    basePrompt += `\n\nIMPORTANT:
+    basePrompt += `\n\nSTEP 1: ANALYZE THE SENDER'S COMMUNICATION STYLE:
+- Formality level: formal ("Dear", "Best regards") vs casual ("Hey", "Thanks!")
+- Energy level: excited ("can't wait!", multiple exclamation marks) vs neutral vs urgent
+- Length preference: brief vs detailed explanations
+- Greeting style: warm ("Hope you're doing well") vs direct business approach
+- Enthusiasm indicators: exclamation marks, positive language, eager phrasing
+
+STEP 2: MIRROR & MATCH THEIR STYLE:
+- If they use exclamation marks, show enthusiasm back (but don't overdo it)
+- If they're casual ("Hey"), be casual back ("Hi!" or "Hello!")
+- If they're excited about meeting, show genuine enthusiasm in your response
+- If they're formal, maintain professionalism while being human
+- Mirror their sentence length and complexity level
+- Match their level of detail (brief vs explanatory)
+
+STEP 3: WRITE LIKE A HUMAN, NOT A CORPORATE BOT:
+❌ Avoid: "Thank you for reaching out regarding the meeting request."
+✅ Use: "Thanks for reaching out!" or "Thanks for getting in touch!"
+
+❌ Avoid: "I confirm my availability for the proposed time slot."
+✅ Use: "That time works great for me!" or "Perfect, I'm free then!"
+
+❌ Avoid: "Please advise of your preferred scheduling alternative."
+✅ Use: "What other times work for you?" or "When else works?"
+
+❌ Avoid: "I look forward to our productive discussion."
+✅ Use: "Looking forward to chatting!" or "Excited to meet!"
+
+RESPONSE GUIDELINES:
 - Keep response concise (2-4 sentences max)
 - Reference specific details from their email when relevant
-- Sound natural and human
-- Don't use overly formal business language
-- Match their communication energy level
+- Sound genuinely human and conversational
+- Match their enthusiasm level authentically
+- Use contractions naturally (I'll, that's, let's)
+- Be warm but not overly familiar with new contacts
 
 OUTPUT FORMAT: You MUST respond with valid JSON in this exact format:
 {
   "emailBody": "complete email body response (do not include subject line)",
-  "reasoning": "brief explanation of your response approach",
+  "reasoning": "brief explanation of your response approach and style matching",
   "confidence": "your confidence level in this response (high/medium/low)"
 }
 
