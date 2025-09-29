@@ -6,6 +6,8 @@ import { SmartAvailabilityService } from './smartAvailability';
 import { pool } from '../database/connection';
 import { safeParseDate, safeParseDateWithValidation } from '../utils/dateParser';
 import { UserProfileService } from './userProfile';
+import { MeetingAIContentService, AIContentRequest } from './meetingAIContent';
+import { AIService } from './ai';
 
 export interface MeetingTimeSlot {
   start: string;
@@ -46,12 +48,16 @@ export class MeetingResponseGeneratorService {
   private gmailService: GmailService;
   private smartAvailabilityService: SmartAvailabilityService;
   private userProfileService: UserProfileService;
+  private aiContentService: MeetingAIContentService;
+  private aiService: AIService;
 
   constructor() {
     this.calendarService = new CalendarService();
     this.gmailService = new GmailService();
     this.smartAvailabilityService = new SmartAvailabilityService(this.calendarService);
     this.userProfileService = new UserProfileService(pool);
+    this.aiService = new AIService();
+    this.aiContentService = new MeetingAIContentService(this.aiService);
   }
 
   /**
@@ -322,7 +328,7 @@ Looking forward to speaking with you!`;
       const timeFormatted = this.formatDateTime(requestedDate);
       
       // Generate personalized response text (we'll update it after calendar event attempt)
-      let responseText = this.generateAcceptanceText(meetingRequest, context, timeFormatted, false);
+      let responseText = await this.generateAcceptanceText(meetingRequest, context, timeFormatted, false, email);
 
       // NEW: AUTO-BOOK CALENDAR EVENT (but don't send email yet - user approval required)
       let calendarEventId: string | null = null;
@@ -368,7 +374,7 @@ Looking forward to speaking with you!`;
       }
 
       // Regenerate response text with correct calendar event status
-      responseText = this.generateAcceptanceText(meetingRequest, context, timeFormatted, calendarEventCreated);
+      responseText = await this.generateAcceptanceText(meetingRequest, context, timeFormatted, calendarEventCreated, email);
 
       return {
         shouldRespond: true,
@@ -402,7 +408,12 @@ Looking forward to speaking with you!`;
     meetingRequest: MeetingRequest,
     context: MeetingResponseContext
   ): Promise<MeetingResponse> {
-    const responseText = this.generateAlternativeTimesText(meetingRequest, context);
+    // Use AI-enhanced alternative times response
+    const responseText = await this.generateAlternativeTimesResponseText(
+      meetingRequest,
+      context,
+      email
+    );
 
     return {
       shouldRespond: true,
@@ -427,20 +438,17 @@ Looking forward to speaking with you!`;
       const schedulingLink = await userProfileService.getSchedulingLink(userId);
 
       if (schedulingLink) {
-        // User has scheduling link - use it
-        const greeting = this.getGreeting(context.senderRelationship, context.userTone);
-        const closing = this.getClosing(context.userTone);
+        // User has scheduling link - use AI-enhanced response
         const timeFormatted = this.formatDateTime(new Date(meetingRequest.preferredDates![0]));
 
-        const responseText = `${greeting}
-
-Thank you for reaching out! Unfortunately, I have a conflict at ${timeFormatted}.
-
-However, I'd be happy to meet with you! Please feel free to book a time that works for both of us using my scheduling link:
-
-${schedulingLink}
-
-${closing}`;
+        // Generate AI-enhanced conflict response with scheduling link
+        const responseText = await this.generateConflictResponseText(
+          meetingRequest,
+          context,
+          schedulingLink,
+          timeFormatted,
+          email
+        );
 
         return {
           shouldRespond: true,
@@ -513,7 +521,7 @@ ${closing}`;
 
     if (schedulingLink) {
       console.log(`🔗 [SCHEDULING LINK] Found scheduling link for user, using link response`);
-      const responseText = this.generateSchedulingLinkText(meetingRequest, context, schedulingLink);
+      const responseText = await this.generateSchedulingLinkText(meetingRequest, context, schedulingLink, email);
       return {
         shouldRespond: true,
         responseText,
@@ -589,8 +597,54 @@ ${closing}`;
 
   /**
    * Generate acceptance response text based on context
+   * PHASE 1: Now runs AI generation in parallel for testing
    */
-  private generateAcceptanceText(
+  private async generateAcceptanceText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    timeFormatted: string,
+    calendarEventCreated: boolean = false,
+    email?: ParsedEmail
+  ): Promise<string> {
+    // PHASE 1: Generate both template and AI responses in parallel for testing
+    const templateResponsePromise = this.generateTemplateAcceptanceText(
+      meetingRequest, context, timeFormatted, calendarEventCreated
+    );
+
+    // Generate AI response in parallel if email is provided
+    const aiResponsePromise = email ? this.generateAIAcceptanceText(
+      meetingRequest, context, timeFormatted, email
+    ) : Promise.resolve(null);
+
+    const [templateResponse, aiResponse] = await Promise.all([
+      templateResponsePromise,
+      aiResponsePromise
+    ]);
+
+    // PHASE 2: Use AI response when successful, fallback to template for safety
+    if (aiResponse && !aiResponse.fallbackUsed && aiResponse.aiGenerated) {
+      console.log('🚀 [PHASE 2 PRODUCTION] Using AI-generated acceptance response');
+      console.log('🤖 AI Response Length:', aiResponse.responseText.length, 'characters');
+      console.log('✨ AI Confidence:', aiResponse.confidence + '%');
+      console.log('💾 Template fallback available if needed');
+
+      return aiResponse.responseText;
+    } else {
+      console.log('📝 [PHASE 2 FALLBACK] Using template response');
+      if (aiResponse && aiResponse.fallbackUsed) {
+        console.log('⚠️ Reason: AI generation failed, using safe template');
+      } else {
+        console.log('ℹ️ Reason: No email provided for AI generation');
+      }
+
+      return templateResponse;
+    }
+  }
+
+  /**
+   * PHASE 1: Original template-based acceptance text generation (extracted for comparison)
+   */
+  private generateTemplateAcceptanceText(
     meetingRequest: MeetingRequest,
     context: MeetingResponseContext,
     timeFormatted: string,
@@ -619,9 +673,102 @@ ${closing}`;
   }
 
   /**
-   * Generate alternative times response text
+   * PHASE 1: AI-powered acceptance text generation (for testing)
    */
-  private generateAlternativeTimesText(
+  private async generateAIAcceptanceText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    timeFormatted: string,
+    email: ParsedEmail
+  ) {
+    try {
+      const aiRequest: AIContentRequest = {
+        action: 'accept',
+        meetingRequest,
+        email,
+        context,
+        timeFormatted
+      };
+
+      return await this.aiContentService.generateEnhancedContent(aiRequest);
+    } catch (error) {
+      console.error('❌ [PHASE 1] AI acceptance generation failed:', error);
+      return { responseText: '', confidence: 0, aiGenerated: false, fallbackUsed: true };
+    }
+  }
+
+  /**
+   * Generate AI-enhanced alternative times response text
+   * Uses AI generation with template fallback for conflict scenarios without scheduling link
+   */
+  private async generateAlternativeTimesResponseText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    email?: ParsedEmail
+  ): Promise<string> {
+    // Generate both template and AI responses in parallel
+    const templateResponsePromise = this.generateTemplateAlternativeTimesText(
+      meetingRequest, context
+    );
+
+    // Generate AI response in parallel if email is provided
+    const aiResponsePromise = email ? this.generateAIAlternativeTimesText(
+      meetingRequest, context, email
+    ) : Promise.resolve(null);
+
+    const [templateResponse, aiResponse] = await Promise.all([
+      templateResponsePromise,
+      aiResponsePromise
+    ]);
+
+    // Use AI response when successful, fallback to template for safety
+    if (aiResponse && !aiResponse.fallbackUsed && aiResponse.aiGenerated) {
+      console.log('🚀 [AI ALTERNATIVES] Using AI-generated alternative times response');
+      console.log('🤖 AI Response Length:', aiResponse.responseText.length, 'characters');
+      console.log('✨ AI Confidence:', aiResponse.confidence + '%');
+      console.log('📅 Alternative times suggested:', context.suggestedTimes?.length || 0);
+
+      return aiResponse.responseText;
+    } else {
+      console.log('📝 [ALTERNATIVES FALLBACK] Using template alternative times response');
+      if (aiResponse && aiResponse.fallbackUsed) {
+        console.log('⚠️ Reason: AI generation failed, using safe template');
+      } else {
+        console.log('ℹ️ Reason: No email provided for AI generation');
+      }
+
+      return templateResponse;
+    }
+  }
+
+  /**
+   * AI-powered alternative times response text generation
+   */
+  private async generateAIAlternativeTimesText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    email: ParsedEmail
+  ) {
+    try {
+      const aiRequest: AIContentRequest = {
+        action: 'alternatives',
+        meetingRequest,
+        email,
+        context,
+        suggestedTimes: context.suggestedTimes
+      };
+
+      return await this.aiContentService.generateEnhancedContent(aiRequest);
+    } catch (error) {
+      console.error('❌ [AI ALTERNATIVES] AI alternative times generation failed:', error);
+      return { responseText: '', confidence: 0, aiGenerated: false, fallbackUsed: true };
+    }
+  }
+
+  /**
+   * Template-based alternative times response text generation (extracted for fallback)
+   */
+  private generateTemplateAlternativeTimesText(
     meetingRequest: MeetingRequest,
     context: MeetingResponseContext
   ): string {
@@ -644,8 +791,45 @@ ${closing}`;
 
   /**
    * Generate scheduling link response text
+   * PHASE 2: Now AI-enhanced with template fallback
    */
-  private generateSchedulingLinkText(
+  private async generateSchedulingLinkText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    schedulingLink: string,
+    email?: ParsedEmail
+  ): Promise<string> {
+    // PHASE 2: Generate both template and AI responses, prefer AI
+    const templateResponsePromise = this.generateTemplateSchedulingLinkText(
+      meetingRequest, context, schedulingLink
+    );
+
+    const aiResponsePromise = email ? this.generateAISchedulingLinkText(
+      meetingRequest, context, schedulingLink, email
+    ) : Promise.resolve(null);
+
+    const [templateResponse, aiResponse] = await Promise.all([
+      templateResponsePromise,
+      aiResponsePromise
+    ]);
+
+    // PHASE 2: Use AI response when successful, fallback to template
+    if (aiResponse && !aiResponse.fallbackUsed && aiResponse.aiGenerated) {
+      console.log('🚀 [PHASE 2 PRODUCTION] Using AI-generated scheduling link response');
+      console.log('🤖 AI Response Length:', aiResponse.responseText.length, 'characters');
+      console.log('✨ AI Confidence:', aiResponse.confidence + '%');
+
+      return aiResponse.responseText;
+    } else {
+      console.log('📝 [PHASE 2 FALLBACK] Using template scheduling link response');
+      return templateResponse;
+    }
+  }
+
+  /**
+   * PHASE 2: Original template-based scheduling link text generation
+   */
+  private generateTemplateSchedulingLinkText(
     meetingRequest: MeetingRequest,
     context: MeetingResponseContext,
     schedulingLink: string
@@ -682,6 +866,128 @@ Thank you for reaching out regarding ${meetingPurpose}. Please schedule a meetin
 ${schedulingLink}
 
 ${closing}`;
+    }
+  }
+
+  /**
+   * PHASE 2: AI-powered scheduling link text generation
+   */
+  private async generateAISchedulingLinkText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    schedulingLink: string,
+    email: ParsedEmail
+  ) {
+    try {
+      const aiRequest: AIContentRequest = {
+        action: 'vague_calendly', // or 'conflict_calendly' based on context
+        meetingRequest,
+        email,
+        context,
+        schedulingLink
+      };
+
+      return await this.aiContentService.generateEnhancedContent(aiRequest);
+    } catch (error) {
+      console.error('❌ [PHASE 2] AI scheduling link generation failed:', error);
+      return { responseText: '', confidence: 0, aiGenerated: false, fallbackUsed: true };
+    }
+  }
+
+  /**
+   * Generate AI-enhanced conflict response text with scheduling link
+   * Uses AI generation with template fallback, similar to acceptance responses
+   */
+  private async generateConflictResponseText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    schedulingLink: string,
+    timeFormatted: string,
+    email?: ParsedEmail
+  ): Promise<string> {
+    // Generate both template and AI responses in parallel for comparison/fallback
+    const templateResponsePromise = this.generateTemplateConflictResponseText(
+      meetingRequest, context, schedulingLink, timeFormatted
+    );
+
+    // Generate AI response in parallel if email is provided
+    const aiResponsePromise = email ? this.generateAIConflictResponseText(
+      meetingRequest, context, schedulingLink, timeFormatted, email
+    ) : Promise.resolve(null);
+
+    const [templateResponse, aiResponse] = await Promise.all([
+      templateResponsePromise,
+      aiResponsePromise
+    ]);
+
+    // Use AI response when successful, fallback to template for safety
+    if (aiResponse && !aiResponse.fallbackUsed && aiResponse.aiGenerated) {
+      console.log('🚀 [AI CONFLICT] Using AI-generated conflict response with scheduling link');
+      console.log('🤖 AI Response Length:', aiResponse.responseText.length, 'characters');
+      console.log('✨ AI Confidence:', aiResponse.confidence + '%');
+      console.log('📅 Conflicting time:', timeFormatted);
+      console.log('🔗 Calendly link provided');
+
+      return aiResponse.responseText;
+    } else {
+      console.log('📝 [CONFLICT FALLBACK] Using template conflict response');
+      if (aiResponse && aiResponse.fallbackUsed) {
+        console.log('⚠️ Reason: AI generation failed, using safe template');
+      } else {
+        console.log('ℹ️ Reason: No email provided for AI generation');
+      }
+
+      return templateResponse;
+    }
+  }
+
+  /**
+   * Template-based conflict response text generation (extracted for fallback)
+   */
+  private generateTemplateConflictResponseText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    schedulingLink: string,
+    timeFormatted: string
+  ): string {
+    const greeting = this.getGreeting(context.senderRelationship, context.userTone);
+    const closing = this.getClosing(context.userTone);
+
+    return `${greeting}
+
+Thank you for reaching out! Unfortunately, I have a conflict at ${timeFormatted}.
+
+However, I'd be happy to meet with you! Please feel free to book a time that works for both of us using my scheduling link:
+
+${schedulingLink}
+
+${closing}`;
+  }
+
+  /**
+   * AI-powered conflict response text generation
+   */
+  private async generateAIConflictResponseText(
+    meetingRequest: MeetingRequest,
+    context: MeetingResponseContext,
+    schedulingLink: string,
+    timeFormatted: string,
+    email: ParsedEmail
+  ) {
+    try {
+      const aiRequest: AIContentRequest = {
+        action: 'conflict_calendly',
+        meetingRequest,
+        email,
+        context,
+        timeFormatted,
+        schedulingLink
+      };
+
+      return await this.aiContentService.generateEnhancedContent(aiRequest);
+    } catch (error) {
+      console.error('❌ [AI CONFLICT] AI conflict generation failed:', error);
+      return { responseText: '', confidence: 0, aiGenerated: false, fallbackUsed: true };
     }
   }
 
