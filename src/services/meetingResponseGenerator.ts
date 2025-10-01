@@ -36,7 +36,7 @@ export interface MeetingResponse {
   bookingDetails?: {
     autoBooked: boolean;
     eventId: string | null;
-    eventStatus: 'tentative' | 'confirmed' | 'not_created';
+    eventStatus: 'tentative' | 'confirmed' | 'not_created' | 'pending_user_approval';
     timeSlot: string;
     duration: number;
     attendeeEmail: string;
@@ -327,54 +327,19 @@ Looking forward to speaking with you!`;
       // Format time for response
       const timeFormatted = this.formatDateTime(requestedDate);
       
-      // Generate personalized response text (we'll update it after calendar event attempt)
+      // Generate personalized response text (no calendar booking yet - user approval required)
       let responseText = await this.generateAcceptanceText(meetingRequest, context, timeFormatted, false, email);
 
-      // NEW: AUTO-BOOK CALENDAR EVENT (but don't send email yet - user approval required)
+      // PHASE 1C: NO AUTO-BOOKING - Calendar event will be created only on user approval
       let calendarEventId: string | null = null;
       let calendarEventCreated = false;
-      
-      try {
-        console.log(`📅 [AUTO-BOOKING] Creating calendar event for available time slot...`);
-        
-        const calendarEvent = await this.calendarService.createCalendarEvent({
-          summary: `Meeting with ${meetingRequest.senderEmail.split('@')[0]}`,
-          description: `Meeting requested via email: "${email.subject}"\n\nFrom: ${email.from}\nRequested: ${timeFormatted}\nDuration: ${duration} minutes`,
-          start: {
-            dateTime: requestedDate.toISOString(),
-            timeZone: 'America/Los_Angeles' // You can make this configurable
-          },
-          end: {
-            dateTime: endTime.toISOString(),
-            timeZone: 'America/Los_Angeles'
-          },
-          attendees: [
-            {
-              email: meetingRequest.senderEmail,
-              responseStatus: 'needsAction'
-            }
-          ],
-          // Set event as tentative until user sends confirmation email
-          status: 'tentative'
-        });
-        
-        calendarEventId = calendarEvent.id || null;
-        calendarEventCreated = true;
-        
-        console.log(`✅ [AUTO-BOOKING] Calendar event created successfully: ${calendarEventId}`);
-        console.log(`📋 [AUTO-BOOKING] Event details: ${timeFormatted} with ${meetingRequest.senderEmail}`);
-        console.log(`⏳ [AUTO-BOOKING] Event status: TENTATIVE (will be confirmed when user sends email)`);
 
-      } catch (calendarError) {
-        console.error(`❌ [AUTO-BOOKING] Failed to create calendar event:`, calendarError);
+      console.log(`⏸️ [NO AUTO-BOOKING] Draft-first approach: calendar event will be created on user approval`);
+      console.log(`📝 [NO AUTO-BOOKING] Meeting proposal for: ${timeFormatted} with ${meetingRequest.senderEmail}`);
+      console.log(`⏳ [NO AUTO-BOOKING] Awaiting user approval to proceed with booking`);
 
-        // Don't fail the whole response if calendar booking fails
-        // User can still approve the draft and we'll handle booking later
-        console.log(`⚠️ [AUTO-BOOKING] Continuing with draft creation despite calendar error`);
-      }
-
-      // Regenerate response text with correct calendar event status
-      responseText = await this.generateAcceptanceText(meetingRequest, context, timeFormatted, calendarEventCreated, email);
+      // Response text remains the same (no calendar event created yet)
+      // The frontend will handle calendar booking after user approves the draft
 
       return {
         shouldRespond: true,
@@ -383,11 +348,11 @@ Looking forward to speaking with you!`;
         calendarEventCreated,
         calendarEventId,
         confidenceScore: 95,
-        // NEW: Include booking status information for frontend
+        // PHASE 1C: Updated booking details - no auto-booking, awaiting user approval
         bookingDetails: {
-          autoBooked: calendarEventCreated,
-          eventId: calendarEventId,
-          eventStatus: calendarEventCreated ? 'tentative' : 'not_created',
+          autoBooked: false, // Always false in draft-first approach
+          eventId: null, // No event created yet
+          eventStatus: 'pending_user_approval', // NEW status indicating user approval needed
           timeSlot: timeFormatted,
           duration: duration,
           attendeeEmail: meetingRequest.senderEmail

@@ -3,6 +3,7 @@ import { MeetingDetectionService, MeetingRequest as DetectedMeetingRequest } fro
 import { MeetingResponseGeneratorService, MeetingResponse } from './meetingResponseGenerator';
 import { GmailService } from './gmail';
 import { pool } from '../database/connection';
+import { DraftModel, MeetingContext } from '../models/Draft';
 
 // Database meeting request with ID
 export interface MeetingRequest extends DetectedMeetingRequest {
@@ -25,11 +26,13 @@ export class MeetingPipelineService {
   private meetingDetection: MeetingDetectionService;
   private responseGenerator: MeetingResponseGeneratorService;
   private gmailService: GmailService;
+  private draftModel: DraftModel;
 
   constructor() {
     this.meetingDetection = new MeetingDetectionService();
     this.responseGenerator = new MeetingResponseGeneratorService();
     this.gmailService = new GmailService();
+    this.draftModel = new DraftModel();
   }
 
   /**
@@ -735,23 +738,71 @@ export class MeetingPipelineService {
 
   /**
    * Save meeting response as draft using a specific database client (for transactions)
+   * NEW: Uses the meeting tagging system with DraftModel
    */
   private async saveMeetingResponseAsDraftWithClient(client: any, email: any, response: any, userId: string, meetingRequest: any): Promise<void> {
-    // This method would implement the draft saving logic with the provided client
-    // For now, we'll delegate to the existing method but note that it should be refactored
-    // to accept a client parameter for full transaction support
-    
-    // TODO: Refactor saveMeetingResponseAsDraft to accept client parameter
-    // For now, log that we're breaking transaction boundary for this operation
-    console.log('⚠️ [TRANSACTION] Breaking transaction boundary for draft saving - consider refactoring');
-    
-    // Call the existing method (this breaks transaction atomicity for this part)
     try {
-      await this.saveMeetingResponseAsDraft(email, response, userId, meetingRequest);
+      console.log(`📝 [MEETING PIPELINE] Creating tagged meeting draft for approval...`);
+
+      // Get the database email ID (not Gmail ID)
+      const emailDbId = await this.getEmailDbId(email.id, userId);
+      if (!emailDbId) {
+        throw new Error(`Email ${email.id} not found in database for user ${userId}`);
+      }
+
+      // Determine subject line
+      let subject = email.subject;
+      if (!subject.toLowerCase().startsWith('re:')) {
+        subject = `Re: ${subject}`;
+      }
+
+      // Map response action to meeting type for context
+      const getMeetingType = (actionTaken: string): MeetingContext['meetingType'] => {
+        switch (actionTaken) {
+          case 'accepted': return 'accept';
+          case 'suggested_scheduling_link_conflict': return 'conflict_calendly';
+          case 'suggested_scheduling_link_vague': return 'vague_calendly';
+          case 'suggested_alternatives': return 'alternatives';
+          case 'requested_more_info': return 'more_info';
+          default: return 'accept'; // Default fallback
+        }
+      };
+
+      // Build meeting context for the draft
+      const meetingContext: MeetingContext = {
+        meetingType: getMeetingType(response.actionTaken),
+        originalRequest: meetingRequest.subject || 'Meeting request',
+        proposedTime: meetingRequest.preferredDates?.[0],
+        hasConflict: response.actionTaken.includes('conflict'),
+        schedulingLink: response.bookingDetails?.eventId ? undefined : 'https://calendly.com/user', // TODO: Get from user profile
+        suggestedTimes: response.actionTaken === 'suggested_alternatives' ? [] : undefined // TODO: Map actual suggestions
+      };
+
+      // Calculate confidence and quality scores
+      const confidenceScore = Math.min(95, Math.max(70, response.confidenceScore || 85));
+      const qualityScore = confidenceScore; // For now, use same value
+
+      // Create tagged meeting draft using DraftModel
+      const draftId = await this.draftModel.saveDraft({
+        email_id: emailDbId,
+        subject: subject,
+        body: response.responseText,
+        category: 'meeting_response', // Category indicates this is meeting-related
+        confidence_score: confidenceScore,
+        quality_score: qualityScore,
+        type: 'meeting_response', // NEW: Tag this as a meeting response
+        meeting_context: meetingContext, // NEW: Store meeting context
+        status: 'pending_user_action' // NEW: Requires user approval before sending
+      });
+
+      console.log(`✅ [MEETING PIPELINE] Tagged meeting draft created with ID: ${draftId}`);
+      console.log(`🏷️ [MEETING PIPELINE] Draft type: meeting_response, context: ${meetingContext.meetingType}`);
+      console.log(`⏳ [MEETING PIPELINE] Status: pending_user_action (awaiting popup approval)`);
+      console.log(`🎯 [MEETING PIPELINE] Original action: ${response.actionTaken}`);
+
     } catch (error) {
-      console.error('❌ [TRANSACTION] Error saving meeting response draft:', error);
-      // Don't throw here as we want to continue with the transaction for other operations
-      // The main pipeline result will still be saved atomically
+      console.error('❌ [MEETING PIPELINE] Error creating tagged meeting draft:', error);
+      throw error; // Throw to maintain transaction integrity
     }
   }
 }

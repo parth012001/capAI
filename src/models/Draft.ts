@@ -8,10 +8,26 @@ export interface Draft {
   category: string;
   confidence_score: number;
   quality_score: number;
-  status: 'pending' | 'approved' | 'sent' | 'declined';
+  status: 'pending' | 'approved' | 'sent' | 'declined' | 'pending_user_action';
+  type?: 'regular' | 'meeting_response' | 'promotional';
+  meeting_context?: MeetingContext;
   created_at: Date;
   approved_at?: Date;
   sent_at?: Date;
+}
+
+export interface MeetingContext {
+  meetingType: 'accept' | 'conflict_calendly' | 'vague_calendly' | 'alternatives' | 'more_info';
+  originalRequest: string;
+  proposedTime?: string;
+  hasConflict: boolean;
+  schedulingLink?: string;
+  suggestedTimes?: Array<{
+    start: string;
+    end: string;
+    formatted: string;
+    confidence: number;
+  }>;
 }
 
 export interface ToneProfile {
@@ -41,6 +57,16 @@ export interface PendingDraftWithEmail extends Draft {
 }
 
 export class DraftModel {
+  /**
+   * Helper method to parse draft rows and handle JSON fields
+   */
+  private parseDraftRow = (row: any): Draft => {
+    return {
+      ...row,
+      meeting_context: row.meeting_context ? JSON.parse(row.meeting_context) : undefined,
+      type: row.type || 'regular'
+    };
+  };
   async saveDraft(draft: {
     email_id: number;
     subject: string;
@@ -48,14 +74,17 @@ export class DraftModel {
     category: string;
     confidence_score: number;
     quality_score: number;
+    type?: 'regular' | 'meeting_response' | 'promotional';
+    meeting_context?: MeetingContext;
+    status?: 'pending' | 'approved' | 'sent' | 'declined' | 'pending_user_action';
   }): Promise<number> {
     try {
       const query = `
-        INSERT INTO drafts (email_id, subject, body, category, confidence_score, quality_score)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO drafts (email_id, subject, body, category, confidence_score, quality_score, type, meeting_context, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING id;
       `;
-      
+
       const values = [
         draft.email_id,
         draft.subject,
@@ -63,6 +92,9 @@ export class DraftModel {
         draft.category,
         draft.confidence_score,
         draft.quality_score,
+        draft.type || 'regular',
+        draft.meeting_context ? JSON.stringify(draft.meeting_context) : null,
+        draft.status || 'pending',
       ];
 
       const result = await pool.query(query, values);
@@ -84,13 +116,13 @@ export class DraftModel {
   async getDraftsByEmail(emailId: number): Promise<Draft[]> {
     try {
       const query = `
-        SELECT * FROM drafts 
-        WHERE email_id = $1 
+        SELECT * FROM drafts
+        WHERE email_id = $1
         ORDER BY created_at DESC;
       `;
-      
+
       const result = await pool.query(query, [emailId]);
-      return result.rows;
+      return result.rows.map(this.parseDraftRow);
     } catch (error) {
       console.error('Error fetching drafts:', error);
       throw error;
@@ -100,16 +132,20 @@ export class DraftModel {
   async getPendingDrafts(limit: number = 20): Promise<PendingDraftWithEmail[]> {
     try {
       const query = `
-        SELECT d.*, e.subject as original_subject, e.from_email 
+        SELECT d.*, e.subject as original_subject, e.from_email
         FROM drafts d
         JOIN emails e ON d.email_id = e.id
-        WHERE d.status = 'pending'
+        WHERE d.status IN ('pending', 'pending_user_action')
         ORDER BY d.created_at DESC
         LIMIT $1;
       `;
-      
+
       const result = await pool.query(query, [limit]);
-      return result.rows;
+      return result.rows.map((row) => ({
+        ...this.parseDraftRow(row),
+        original_subject: row.original_subject,
+        from_email: row.from_email,
+      }));
     } catch (error) {
       console.error('Error fetching pending drafts:', error);
       throw error;
@@ -288,6 +324,49 @@ export class DraftModel {
       console.log(`✅ Marked ${emailIds.length} emails as analyzed`);
     } catch (error) {
       console.error('Error marking emails as analyzed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get meeting drafts that need user action (for popup system)
+   */
+  async getMeetingDraftsAwaitingAction(): Promise<Draft[]> {
+    try {
+      const query = `
+        SELECT * FROM drafts
+        WHERE type = 'meeting_response'
+        AND status = 'pending_user_action'
+        ORDER BY created_at DESC;
+      `;
+
+      const result = await pool.query(query);
+      return result.rows.map(this.parseDraftRow);
+    } catch (error) {
+      console.error('Error fetching meeting drafts awaiting action:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Update draft with meeting context and status
+   */
+  async updateDraftWithMeetingContext(
+    draftId: number,
+    meetingContext: MeetingContext,
+    status: Draft['status'] = 'pending_user_action'
+  ): Promise<void> {
+    try {
+      const query = `
+        UPDATE drafts
+        SET meeting_context = $1, status = $2, type = 'meeting_response'
+        WHERE id = $3;
+      `;
+
+      await pool.query(query, [JSON.stringify(meetingContext), status, draftId]);
+      console.log(`✅ Draft ${draftId} updated with meeting context`);
+    } catch (error) {
+      console.error('Error updating draft with meeting context:', error);
       throw error;
     }
   }
