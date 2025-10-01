@@ -782,23 +782,61 @@ export class MeetingPipelineService {
       const confidenceScore = Math.min(95, Math.max(70, response.confidenceScore || 85));
       const qualityScore = confidenceScore; // For now, use same value
 
-      // Create tagged meeting draft using DraftModel
-      const draftId = await this.draftModel.saveDraft({
-        email_id: emailDbId,
-        subject: subject,
-        body: response.responseText,
-        category: 'meeting_response', // Category indicates this is meeting-related
-        confidence_score: confidenceScore,
-        quality_score: qualityScore,
-        type: 'meeting_response', // NEW: Tag this as a meeting response
-        meeting_context: meetingContext, // NEW: Store meeting context
-        status: 'pending_user_action' // NEW: Requires user approval before sending
-      });
+      // Save meeting draft to auto_generated_drafts table
+      const contextUsed = {
+        source: 'meeting_pipeline',
+        urgency: meetingRequest.urgencyLevel,
+        confidence: meetingRequest.detectionConfidence,
+        actionTaken: response.actionTaken,
+        meetingType: meetingRequest.meetingType,
+        originalEmail: {
+          from: email.from,
+          gmailId: email.id,
+          subject: email.subject,
+          threadId: email.threadId
+        },
+        meetingRequest: {
+          id: meetingRequest.id,
+          type: meetingRequest.meetingType,
+          urgency: meetingRequest.urgencyLevel,
+          duration: meetingRequest.requestedDuration,
+          preferredDates: meetingRequest.preferredDates,
+          selectedTimeSlot: null,
+          locationPreference: meetingRequest.locationPreference,
+          specialRequirements: meetingRequest.specialRequirements
+        },
+        calendarBooking: {
+          eventId: response.bookingDetails?.eventId || null,
+          autoBooked: response.bookingDetails?.autoBooked || false,
+          eventStatus: response.bookingDetails?.eventStatus || 'not_created',
+          bookingDetails: response.bookingDetails || null
+        }
+      };
 
-      console.log(`✅ [MEETING PIPELINE] Tagged meeting draft created with ID: ${draftId}`);
-      console.log(`🏷️ [MEETING PIPELINE] Draft type: meeting_response, context: ${meetingContext.meetingType}`);
-      console.log(`⏳ [MEETING PIPELINE] Status: pending_user_action (awaiting popup approval)`);
-      console.log(`🎯 [MEETING PIPELINE] Original action: ${response.actionTaken}`);
+      const draftQuery = `
+        INSERT INTO auto_generated_drafts (
+          draft_id, original_email_id, subject, body, tone, urgency_level,
+          context_used, relationship_type, status, user_id, created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+        RETURNING id
+      `;
+
+      const result = await pool.query(draftQuery, [
+        `meeting_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        emailDbId,
+        subject,
+        response.responseText,
+        'professional',
+        meetingRequest.urgencyLevel,
+        JSON.stringify(contextUsed),
+        'meeting_response',
+        'pending',
+        userId
+      ]);
+
+      const draftId = result.rows[0].id;
+      console.log(`✅ [MEETING PIPELINE] Meeting draft saved - ID: ${draftId}`);
+      console.log(`🎯 [MEETING PIPELINE] Action: ${response.actionTaken}, Status: pending (awaiting user approval)`);
 
     } catch (error) {
       console.error('❌ [MEETING PIPELINE] Error creating tagged meeting draft:', error);

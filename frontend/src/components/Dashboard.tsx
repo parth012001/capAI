@@ -9,6 +9,7 @@ import { CalendarPanel } from './calendar/CalendarPanel';
 import { DashboardTabs } from './navigation/DashboardTabs';
 import { Toast } from './ui/Toast';
 import { ProfileButton } from './ui/ProfileButton';
+import { MeetingPopupManager } from './meeting';
 import { useToast } from '../hooks/useToast';
 import { useUnreadPromotionalEmailCount } from '../hooks/usePromotionalEmails';
 import type { DashboardTab } from '../types/promotionalEmail';
@@ -80,6 +81,9 @@ export default function Dashboard() {
           <Toast key={toast.id} {...toast} />
         ))}
       </div>
+
+      {/* Meeting Response Popups */}
+      <MeetingPopupManager />
     </div>
   );
 }
