@@ -147,7 +147,52 @@ export class MeetingAIContentService {
         basePrompt += `Their request needs MORE INFORMATION about timing. Show interest in meeting while asking for clarification. Be helpful and suggest what information would be useful (specific times, duration, etc.).`;
         break;
       case 'decline':
-        basePrompt += `You are POLITELY DECLINING their meeting request. Be respectful, brief, and preserve the relationship. Acknowledge their request with gratitude, express genuine regret, briefly mention the reason (if appropriate and professional), and leave the door open for future connection. Keep it warm but concise - don't over-explain.`;
+        basePrompt += `You are POLITELY DECLINING their meeting request. Your goal is to maintain the relationship while being honest.
+
+DECLINE RESPONSE STRUCTURE (follow this order):
+1. **Greeting** - Match their style (if they said "Hey" → use "Hi", if "Dear" → use "Hello")
+2. **Gratitude** - Thank them genuinely for thinking of you/reaching out
+3. **Direct but Kind Decline** - Be clear you can't make it, no corporate jargon
+4. **Brief Reason** - Natural explanation (1 sentence max, don't over-justify)
+5. **Future Door Open** - Show interest in connecting another time (be specific if possible)
+6. **Warm Sign-off** - End with appropriate closing based on their formality
+
+TONE MATCHING:
+- Mirror their communication style closely
+- If they're enthusiastic → show warmth in your regret
+- If they're formal → be polite but still human
+- If they're casual → keep it friendly and conversational
+
+EXAMPLES OF GOOD DECLINE RESPONSES:
+
+Example 1 (Casual):
+"Hey [Name]!
+
+Thanks so much for reaching out about meeting next week! Unfortunately, I won't be able to make it since I'll be traveling during that time.
+
+I'd definitely love to connect when I'm back though. Would the following week work for you?
+
+Best,
+[Your name]"
+
+Example 2 (Professional):
+"Hi [Name],
+
+Thank you for the invitation to discuss [topic]. I appreciate you thinking of me for this.
+
+Unfortunately, I won't be available during that timeframe due to prior commitments. However, I'm definitely interested in connecting and would love to find another time that works.
+
+Would you be open to meeting in early [next month]?
+
+Best regards,
+[Your name]"
+
+CRITICAL RULES:
+- MUST include a sign-off (Best, Best regards, Thanks, Cheers, etc. based on formality)
+- Reference specific details from their email when possible
+- Keep it conversational and human
+- Don't say "I hope this email finds you well" or other corporate clichés
+- Be genuinely warm, even while declining`;
         break;
     }
 
@@ -262,12 +307,36 @@ ${suggestedTimes.map((time, i) => `  ${i + 1}. ${time.formatted}`).join('\n')}`;
 
       case 'decline':
         if (request.declineReason) {
-          prompt += `\nYour Response Context:
-- You need to DECLINE this meeting request
-- Your reason: ${request.declineReason}
-- Keep it brief and professional
-- Express gratitude and regret
-- Leave door open for future connection`;
+          prompt += `\n\n=== ANALYZE THEIR EMAIL STYLE FIRST ===
+Read their email carefully and note:
+- How formal/casual is their language?
+- What greeting did they use?
+- How enthusiastic are they? (exclamation marks, positive words)
+- What specific details did they mention about the meeting?
+- How long/short are their sentences?
+
+Their Original Email Body:
+"""
+${email.body}
+"""
+
+=== NOW CRAFT YOUR DECLINE RESPONSE ===
+
+Your Response Context:
+- You CANNOT attend this meeting
+- Your honest reason: ${request.declineReason}
+- You want to maintain a positive relationship
+- You're open to meeting another time
+
+INSTRUCTIONS:
+1. Start with a greeting that MATCHES their style (if they said "Hey" use "Hi", if "Dear" use "Hello")
+2. Thank them genuinely (reference something specific from their email if possible)
+3. Clearly state you can't make it (be direct but kind)
+4. Give your reason naturally (1 sentence, don't over-explain: "${request.declineReason}")
+5. Show interest in connecting later (be specific if you can)
+6. End with a warm sign-off appropriate to their formality level (REQUIRED: Best/Best regards/Thanks/Cheers based on their tone)
+
+CRITICAL: Your response should feel like it's written by someone who actually READ their email and is responding naturally.`;
         }
         break;
     }
@@ -341,6 +410,21 @@ ${suggestedTimes.map((time, i) => `  ${i + 1}. ${time.formatted}`).join('\n')}`;
 
         if (!hasGratitude) {
           return { isValid: false, reason: 'Decline response should express gratitude' };
+        }
+
+        // Ensure it has a sign-off (Best, Best regards, Thanks, Cheers, etc.)
+        const hasSignOff =
+          declineContent.includes('best,') ||
+          declineContent.includes('best regards,') ||
+          declineContent.includes('thanks,') ||
+          declineContent.includes('cheers,') ||
+          declineContent.includes('warm regards,') ||
+          declineContent.includes('sincerely,') ||
+          declineContent.includes('regards,') ||
+          declineContent.includes('thank you,');
+
+        if (!hasSignOff) {
+          return { isValid: false, reason: 'Decline response must include a sign-off (Best, Best regards, Thanks, etc.)' };
         }
         break;
     }

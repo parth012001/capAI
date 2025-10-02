@@ -1525,7 +1525,7 @@ app.post('/auto-drafts/:id/decline', authMiddleware.authenticate, async (req, re
         subject: context.originalEmail.subject || '',
         from: context.originalEmail.from || '',
         threadId: context.originalEmail.threadId || '',
-        body: '',
+        body: context.originalEmail.body || '',
         date: new Date(),
         to: '',
         snippet: ''
@@ -1593,6 +1593,13 @@ ${closing}`;
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
       RETURNING id
     `;
+
+    // Mark the old draft as superseded before creating new one
+    await pool.query(
+      `UPDATE auto_generated_drafts SET status = $1 WHERE id = $2`,
+      ['superseded', draftId]
+    );
+    console.log(`🔄 [DECLINE] Marked old draft ${draftId} as superseded`);
 
     const result = await pool.query(newDraftQuery, [
       `decline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
