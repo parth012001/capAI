@@ -1,7 +1,7 @@
 import { useCallback } from 'react';
 import { MeetingResponsePopup } from './MeetingResponsePopup';
 import { useMeetingPopups } from '../../hooks/useMeetingPopups';
-import { useApproveDraft, useDeleteDraft } from '../../hooks/useDrafts';
+import { useSendDraft, useDeleteDraft } from '../../hooks/useDrafts';
 
 /**
  * Meeting Popup Manager
@@ -17,27 +17,27 @@ export function MeetingPopupManager() {
     getMeetingContext
   } = useMeetingPopups();
 
-  const approveDraft = useApproveDraft();
+  const sendDraft = useSendDraft();
   const deleteDraft = useDeleteDraft();
 
   // Handle approve action (send response + book calendar if needed)
   const handleApprove = useCallback(async (draftId: number) => {
     try {
-      console.log('🎯 [MEETING POPUP] Approving meeting response:', draftId);
+      console.log('🎯 [MEETING POPUP] Sending meeting response:', draftId);
 
-      // Use existing approve draft mutation
-      await approveDraft.mutateAsync(draftId);
+      // Use send draft mutation to actually send the email (+ book calendar)
+      await sendDraft.mutateAsync(draftId);
 
       // Mark popup as handled
       markPopupShown(draftId);
       setActivePopup(null);
 
-      console.log('✅ [MEETING POPUP] Meeting response approved and sent');
+      console.log('✅ [MEETING POPUP] Meeting response sent successfully');
     } catch (error) {
-      console.error('❌ [MEETING POPUP] Failed to approve meeting response:', error);
+      console.error('❌ [MEETING POPUP] Failed to send meeting response:', error);
       // TODO: Show error toast/notification
     }
-  }, [approveDraft, markPopupShown, setActivePopup]);
+  }, [sendDraft, markPopupShown, setActivePopup]);
 
   // Handle decline action (will generate decline response in Phase 3)
   const handleDecline = useCallback(async (draftId: number) => {
@@ -88,7 +88,7 @@ export function MeetingPopupManager() {
       onApprove={handleApprove}
       onDecline={handleDecline}
       onIgnore={handleIgnore}
-      isLoading={approveDraft.isPending || deleteDraft.isPending}
+      isLoading={sendDraft.isPending || deleteDraft.isPending}
     />
   );
 }
