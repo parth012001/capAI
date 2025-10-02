@@ -51,17 +51,11 @@ export function useMeetingPopups() {
     if (!draftsData?.drafts) return [];
 
     return draftsData.drafts.filter((draft): draft is MeetingDraft => {
-      // Check if this is a meeting response draft
-      const context = draft.contextUsed;
-
       // Primary detection: relationship type column (this is reliable)
       const isMeetingResponse = draft.relationshipType === 'meeting_response';
 
       // Check if it needs user action
       const needsUserAction = draft.status === 'pending';
-
-      // Optional: Secondary validation with context if available
-      const hasValidContext = !context || context.source === 'meeting_pipeline';
 
       // Meeting response with pending status should show popup
       if (!isMeetingResponse || !needsUserAction) return false;

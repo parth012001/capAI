@@ -4,7 +4,7 @@ import { ParsedEmail } from '../types';
 import type { MeetingResponseContext } from './meetingResponseGenerator';
 
 export interface AIContentRequest {
-  action: 'accept' | 'conflict_calendly' | 'vague_calendly' | 'alternatives' | 'more_info';
+  action: 'accept' | 'conflict_calendly' | 'vague_calendly' | 'alternatives' | 'more_info' | 'decline';
   meetingRequest: MeetingRequest;
   email: ParsedEmail;
   context: MeetingResponseContext;
@@ -16,6 +16,7 @@ export interface AIContentRequest {
     formatted: string;
     confidence: number;
   }>;
+  declineReason?: string; // User's reason for declining the meeting
 }
 
 export interface AIContentResponse {
@@ -145,6 +146,9 @@ export class MeetingAIContentService {
       case 'more_info':
         basePrompt += `Their request needs MORE INFORMATION about timing. Show interest in meeting while asking for clarification. Be helpful and suggest what information would be useful (specific times, duration, etc.).`;
         break;
+      case 'decline':
+        basePrompt += `You are POLITELY DECLINING their meeting request. Be respectful, brief, and preserve the relationship. Acknowledge their request with gratitude, express genuine regret, briefly mention the reason (if appropriate and professional), and leave the door open for future connection. Keep it warm but concise - don't over-explain.`;
+        break;
     }
 
     basePrompt += `\n\nSTEP 1: ANALYZE THE SENDER'S COMMUNICATION STYLE:
@@ -255,6 +259,17 @@ ${suggestedTimes.map((time, i) => `  ${i + 1}. ${time.formatted}`).join('\n')}`;
 - You need more information about timing
 - Show interest but ask for specific time options`;
         break;
+
+      case 'decline':
+        if (request.declineReason) {
+          prompt += `\nYour Response Context:
+- You need to DECLINE this meeting request
+- Your reason: ${request.declineReason}
+- Keep it brief and professional
+- Express gratitude and regret
+- Leave door open for future connection`;
+        }
+        break;
     }
 
     prompt += `\n\nGenerate a natural, professional meeting response in JSON format. The emailBody should contain only the email body content without any subject line references.`;
@@ -299,6 +314,33 @@ ${suggestedTimes.map((time, i) => `  ${i + 1}. ${time.formatted}`).join('\n')}`;
         const lowerContent = content.toLowerCase();
         if (lowerContent.includes('unfortunately') || lowerContent.includes('conflict') || lowerContent.includes('cannot')) {
           return { isValid: false, reason: 'Acceptance response contains declining language' };
+        }
+        break;
+
+      case 'decline':
+        // For decline, ensure it's actually declining
+        const declineContent = content.toLowerCase();
+        const hasDeclineLanguage =
+          declineContent.includes('unable') ||
+          declineContent.includes('cannot') ||
+          declineContent.includes('can\'t') ||
+          declineContent.includes('unfortunately') ||
+          declineContent.includes('decline') ||
+          declineContent.includes('not available') ||
+          declineContent.includes('won\'t be able');
+
+        if (!hasDeclineLanguage) {
+          return { isValid: false, reason: 'Decline response doesn\'t actually decline the meeting' };
+        }
+
+        // Ensure it's polite (has gratitude or appreciation)
+        const hasGratitude =
+          declineContent.includes('thank') ||
+          declineContent.includes('appreciate') ||
+          declineContent.includes('grateful');
+
+        if (!hasGratitude) {
+          return { isValid: false, reason: 'Decline response should express gratitude' };
         }
         break;
     }

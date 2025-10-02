@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Card, CardHeader, CardContent, Badge, Spinner, Button } from '../ui';
+import { Card, CardHeader, CardContent, Badge, Spinner, Button, Modal } from '../ui';
 import { formatDate, truncateText } from '../../lib/utils';
-import { useLatestDraft, useSendDraft, useDeleteDraft, useUpdateDraft } from '../../hooks/useDrafts';
+import { useLatestDraft, useSendDraft, useDeleteDraft, useUpdateDraft, useDeclineDraft } from '../../hooks/useDrafts';
 import { useToast } from '../../hooks/useToast';
 import { useTopLearningInsight, useCurrentSuccessRate } from '../../hooks/useLearning';
 import { FileText, Send, Edit3, Trash2, Clock, Target, Volume2, Save, X, Brain, TrendingUp, Calendar, Users, AlertTriangle, CheckCircle, XCircle, MessageCircle } from 'lucide-react';
@@ -14,6 +14,7 @@ export function DraftPanel() {
   const { mutate: sendDraft, isPending: isSending } = useSendDraft();
   const { mutate: deleteDraft, isPending: isDeleting } = useDeleteDraft();
   const { mutate: updateDraft, isPending: isUpdating } = useUpdateDraft();
+  const { mutate: declineDraft, isPending: isDeclining } = useDeclineDraft();
   const { success, error: showError } = useToast();
   const { insight: topInsight, hasHighConfidenceInsight } = useTopLearningInsight();
   const { successRate, trend } = useCurrentSuccessRate();
@@ -21,6 +22,8 @@ export function DraftPanel() {
   const [isEditing, setIsEditing] = useState(false);
   const [editedSubject, setEditedSubject] = useState('');
   const [editedBody, setEditedBody] = useState('');
+  const [showDeclineModal, setShowDeclineModal] = useState(false);
+  const [declineReason, setDeclineReason] = useState('');
 
   const latestDraft = data?.drafts?.[0];
 
@@ -140,8 +143,39 @@ export function DraftPanel() {
   const handleDecline = () => {
     if (!latestDraft) return;
 
-    // TODO: Implement decline functionality in Phase 3
-    showError('Feature Coming Soon', 'Decline response generation will be available in the next update');
+    // Open decline modal
+    setShowDeclineModal(true);
+  };
+
+  const handleDeclineSubmit = () => {
+    if (!latestDraft) return;
+
+    // Validate reason
+    if (!declineReason.trim() || declineReason.trim().length < 5) {
+      showError('Reason Required', 'Please provide a reason for declining (minimum 5 characters)');
+      return;
+    }
+
+    // Call decline API
+    declineDraft(
+      { id: latestDraft.id, reason: declineReason.trim() },
+      {
+        onSuccess: () => {
+          success('Decline Response Generated', 'A polite decline response has been created');
+          setShowDeclineModal(false);
+          setDeclineReason('');
+          refetch();
+        },
+        onError: (error: any) => {
+          showError('Failed to Generate Decline', error?.message || 'Could not create decline response');
+        },
+      }
+    );
+  };
+
+  const handleDeclineCancel = () => {
+    setShowDeclineModal(false);
+    setDeclineReason('');
   };
 
   const handleDelete = () => {
@@ -271,6 +305,7 @@ export function DraftPanel() {
   }
 
   return (
+    <>
     <Card className="h-full">
       <CardHeader className="flex flex-row items-center justify-between">
         <div className="flex items-center space-x-2">
@@ -289,9 +324,9 @@ export function DraftPanel() {
             <Badge
               variant={
                 meetingStatus.color === 'green' ? 'success' :
-                meetingStatus.color === 'red' ? 'destructive' :
+                meetingStatus.color === 'red' ? 'error' :
                 meetingStatus.color === 'yellow' ? 'warning' :
-                'secondary'
+                'info'
               }
               className={`
                 ${meetingStatus.color === 'blue' ? 'bg-blue-100 text-blue-800 border-blue-200' : ''}
@@ -582,10 +617,10 @@ export function DraftPanel() {
 
                   <Button
                     onClick={handleDecline}
-                    disabled={isSending || latestDraft.status !== 'pending'}
+                    disabled={isSending || isDeclining || latestDraft.status !== 'pending'}
                     variant="outline"
                     className="border-2 border-red-500 text-red-600 hover:bg-red-50 hover:border-red-600 font-medium shadow-sm hover:shadow-md transition-all duration-200 px-4 py-2"
-                    title="Generate and send a polite decline response (coming soon)"
+                    title="Generate a polite decline response"
                   >
                     <XCircle className="h-4 w-4 mr-2" />
                     Decline Meeting
@@ -687,5 +722,64 @@ export function DraftPanel() {
         )}
       </CardContent>
     </Card>
+
+      {/* Decline Modal */}
+      <Modal
+        isOpen={showDeclineModal}
+        onClose={handleDeclineCancel}
+        title="Decline Meeting"
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            Why do you want to decline this meeting? Your reason will help generate a polite and professional decline response.
+          </p>
+
+          <div>
+            <label htmlFor="declineReason" className="block text-sm font-medium text-gray-700 mb-2">
+              Reason for declining
+            </label>
+            <textarea
+              id="declineReason"
+              value={declineReason}
+              onChange={(e) => setDeclineReason(e.target.value)}
+              placeholder="e.g., I'll be out of town that week, I have a scheduling conflict, etc."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none text-gray-900 placeholder-gray-400"
+              rows={4}
+              disabled={isDeclining}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Minimum 5 characters
+            </p>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-3 pt-2">
+            <Button
+              onClick={handleDeclineCancel}
+              variant="ghost"
+              disabled={isDeclining}
+              className="px-4 py-2"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeclineSubmit}
+              disabled={isDeclining || !declineReason.trim() || declineReason.trim().length < 5}
+              className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white px-4 py-2"
+            >
+              {isDeclining ? (
+                <>
+                  <Spinner size="sm" className="mr-2" />
+                  Generating...
+                </>
+              ) : (
+                'Generate Decline Response'
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }

@@ -139,6 +139,12 @@ export const draftAPI = {
     const response = await api.delete(`/auto-drafts/${id}`);
     return response.data;
   },
+
+  // Decline meeting draft
+  declineDraft: async (id: number, reason: string) => {
+    const response = await api.post(`/auto-drafts/${id}/decline`, { reason });
+    return response.data;
+  },
 };
 
 // Promotional Email API calls

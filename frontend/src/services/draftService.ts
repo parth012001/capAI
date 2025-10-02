@@ -111,6 +111,18 @@ export class DraftService {
       throw error;
     }
   }
+
+  /**
+   * Decline meeting draft with reason
+   */
+  async declineDraft(id: number, reason: string): Promise<DraftActionResponse> {
+    try {
+      return await draftAPI.declineDraft(id, reason);
+    } catch (error) {
+      console.error(`Failed to decline draft ${id}:`, error);
+      throw error;
+    }
+  }
 }
 
 export const draftService = new DraftService();

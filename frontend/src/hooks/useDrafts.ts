@@ -104,6 +104,21 @@ export function useDeleteDraft() {
 }
 
 /**
+ * Hook to decline meeting draft
+ */
+export function useDeclineDraft() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: number; reason: string }) =>
+      draftService.declineDraft(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['drafts'] });
+    },
+  });
+}
+
+/**
  * Hook to approve and send draft in one action
  */
 export function useApproveAndSendDraft() {
