@@ -228,15 +228,18 @@ export class EmailModel {
         return { success: true, emailId: updateResult.rows[0].id };
       } else {
         // New email for this user - insert with webhook_processed = true and user_id
+        // Use ON CONFLICT to handle race conditions when multiple processes try to insert same email
         const insertQuery = `
           INSERT INTO emails (
-            gmail_id, thread_id, subject, from_email, to_email, body, 
+            gmail_id, thread_id, subject, from_email, to_email, body,
             received_at, is_read, webhook_processed, user_id
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9)
+          ON CONFLICT (gmail_id, user_id)
+          DO UPDATE SET webhook_processed = true
           RETURNING id
         `;
         const insertResult = await client.query(insertQuery, [
-          email.id, email.threadId, email.subject, email.from, 
+          email.id, email.threadId, email.subject, email.from,
           email.to, email.body, email.date, email.isRead, userId
         ]);
         

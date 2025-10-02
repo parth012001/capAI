@@ -53,7 +53,7 @@ export function DraftPanel() {
     }
 
     switch (actionTaken) {
-      case 'accepted': return { type: 'accept', label: 'MEETING ACCEPTED', color: 'green' };
+      case 'accepted': return { type: 'accept', label: 'NO CONFLICT', color: 'green' };
       case 'suggested_scheduling_link_conflict': return { type: 'conflict', label: 'TIME CONFLICT', color: 'red' };
       case 'suggested_scheduling_link_vague': return { type: 'unclear', label: 'TIME UNCLEAR', color: 'yellow' };
       case 'suggested_alternatives': return { type: 'alternatives', label: 'ALTERNATIVE TIMES', color: 'blue' };
