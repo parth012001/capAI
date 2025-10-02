@@ -243,7 +243,27 @@ Respond with JSON:
     for (const { pattern, multiplier, value } of durationPatterns) {
       const match = text.match(pattern);
       if (match) {
-        return value || (parseInt(match[1]) * (multiplier || 1));
+        const duration = value || (parseInt(match[1]) * (multiplier || 1));
+        // Cap duration at 2 hours (120 minutes) for safety
+        return Math.min(duration, 120);
+      }
+    }
+
+    // Check for common meeting types that shouldn't be 4+ hours
+    const shortMeetingPatterns = [
+      /planning\s*session/i,
+      /team\s*meeting/i,
+      /standup/i,
+      /sync/i,
+      /check.?in/i,
+      /1.?on.?1/i,
+      /one.?on.?one/i
+    ];
+
+    for (const pattern of shortMeetingPatterns) {
+      if (text.match(pattern)) {
+        console.log(`🔍 [DURATION] Detected short meeting pattern: "${pattern}" - defaulting to 60 minutes`);
+        return 60;
       }
     }
 

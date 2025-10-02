@@ -9,7 +9,7 @@ import { CalendarPanel } from './calendar/CalendarPanel';
 import { DashboardTabs } from './navigation/DashboardTabs';
 import { Toast } from './ui/Toast';
 import { ProfileButton } from './ui/ProfileButton';
-import { MeetingPopupManager } from './meeting';
+// import { MeetingPopupManager } from './meeting'; // Disabled - using enhanced draft panel instead
 import { useToast } from '../hooks/useToast';
 import { useUnreadPromotionalEmailCount } from '../hooks/usePromotionalEmails';
 import type { DashboardTab } from '../types/promotionalEmail';
@@ -82,8 +82,8 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Meeting Response Popups */}
-      <MeetingPopupManager />
+      {/* Meeting Response Popups - Disabled: Using enhanced draft panel instead */}
+      {/* <MeetingPopupManager /> */}
     </div>
   );
 }

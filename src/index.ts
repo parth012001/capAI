@@ -1334,7 +1334,16 @@ app.post('/auto-drafts/:id/send', authMiddleware.authenticate, async (req, res) 
 
             // Create calendar event with proper structure
             const startTime = new Date(proposedTime);
-            const endTime = new Date(startTime.getTime() + (context.meetingRequest.duration || 60) * 60000);
+            const durationMinutes = Math.min(context.meetingRequest.duration || 60, 120); // Cap at 2 hours max
+            console.log(`📅 [CALENDAR DEBUG] Duration calculation:`, {
+              originalDuration: context.meetingRequest.duration,
+              fallbackDuration: 60,
+              maxCap: 120,
+              finalDuration: durationMinutes,
+              startTime: startTime.toISOString(),
+              durationMs: durationMinutes * 60000
+            });
+            const endTime = new Date(startTime.getTime() + durationMinutes * 60000);
 
             const calendarEvent = {
               summary: meetingTitle,
