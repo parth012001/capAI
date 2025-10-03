@@ -12,12 +12,14 @@ import { ProfileButton } from './ui/ProfileButton';
 // import { MeetingPopupManager } from './meeting'; // Disabled - using enhanced draft panel instead
 import { useToast } from '../hooks/useToast';
 import { useUnreadPromotionalEmailCount } from '../hooks/usePromotionalEmails';
+import { usePendingDraftCount } from '../hooks/useDrafts';
 import type { DashboardTab } from '../types/promotionalEmail';
 
 export default function Dashboard() {
   const { toasts } = useToast();
   const [activeTab, setActiveTab] = useState<DashboardTab>('active');
   const { unreadCount } = useUnreadPromotionalEmailCount();
+  const { pendingCount } = usePendingDraftCount();
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -37,10 +39,11 @@ export default function Dashboard() {
         </div>
         
         {/* Tab Navigation */}
-        <DashboardTabs 
-          activeTab={activeTab} 
+        <DashboardTabs
+          activeTab={activeTab}
           onTabChange={setActiveTab}
           unreadPromotionalCount={unreadCount}
+          pendingDraftCount={pendingCount}
         />
         
         {/* Content based on active tab */}

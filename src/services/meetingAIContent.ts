@@ -17,6 +17,7 @@ export interface AIContentRequest {
     confidence: number;
   }>;
   declineReason?: string; // User's reason for declining the meeting
+  userName?: string; // User's actual name for signature (no placeholder needed)
 }
 
 export interface AIContentResponse {
@@ -166,26 +167,26 @@ TONE MATCHING:
 EXAMPLES OF GOOD DECLINE RESPONSES:
 
 Example 1 (Casual):
-"Hey [Name]!
+"Hey Sarah!
 
 Thanks so much for reaching out about meeting next week! Unfortunately, I won't be able to make it since I'll be traveling during that time.
 
 I'd definitely love to connect when I'm back though. Would the following week work for you?
 
 Best,
-[Your name]"
+John Smith"
 
 Example 2 (Professional):
-"Hi [Name],
+"Hi David,
 
-Thank you for the invitation to discuss [topic]. I appreciate you thinking of me for this.
+Thank you for the invitation to discuss the Q4 strategy. I appreciate you thinking of me for this.
 
 Unfortunately, I won't be available during that timeframe due to prior commitments. However, I'm definitely interested in connecting and would love to find another time that works.
 
-Would you be open to meeting in early [next month]?
+Would you be open to meeting in early November?
 
 Best regards,
-[Your name]"
+Jane Doe"
 
 CRITICAL RULES:
 - MUST include a sign-off (Best, Best regards, Thanks, Cheers, etc. based on formality)
@@ -335,6 +336,7 @@ INSTRUCTIONS:
 4. Give your reason naturally (1 sentence, don't over-explain: "${request.declineReason}")
 5. Show interest in connecting later (be specific if you can)
 6. End with a warm sign-off appropriate to their formality level (REQUIRED: Best/Best regards/Thanks/Cheers based on their tone)
+${request.userName ? `7. Sign your name as: ${request.userName}` : '7. Do NOT include a name signature - just end with the sign-off (Best, Thanks, etc.)'}
 
 CRITICAL: Your response should feel like it's written by someone who actually READ their email and is responding naturally.`;
         }

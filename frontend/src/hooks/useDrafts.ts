@@ -119,6 +119,19 @@ export function useDeclineDraft() {
 }
 
 /**
+ * Hook to get pending draft count
+ * Derives count from existing useDrafts() data - no extra API calls!
+ */
+export function usePendingDraftCount() {
+  const { data: draftsData, isLoading } = useDrafts();
+
+  return {
+    pendingCount: draftsData?.drafts?.filter(draft => draft.status === 'pending').length || 0,
+    isLoading,
+  };
+}
+
+/**
  * Hook to approve and send draft in one action
  */
 export function useApproveAndSendDraft() {

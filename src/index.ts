@@ -1516,6 +1516,31 @@ app.post('/auto-drafts/:id/decline', authMiddleware.authenticate, async (req, re
     const userTone = await getUserTone(userId);
     console.log(`🎨 [DECLINE] Using tone: ${userTone}`);
 
+    // Get user's name for signature
+    const getUserName = async (userId: string): Promise<string> => {
+      try {
+        const result = await pool.query(`
+          SELECT first_name, last_name, full_name
+          FROM user_gmail_tokens
+          WHERE user_id = $1
+        `, [userId]);
+
+        if (result.rows.length > 0) {
+          const userData = result.rows[0];
+          // Use full_name if available, otherwise first_name, otherwise empty
+          return userData.full_name || userData.first_name || '';
+        }
+
+        return '';
+      } catch (error) {
+        console.error('❌ Error getting user name:', error);
+        return '';
+      }
+    };
+
+    const userName = await getUserName(userId);
+    console.log(`👤 [DECLINE] User name: ${userName || '(not set)'}`);
+
     // Build decline request for AI service
     const declineRequest: any = {
       action: 'decline',
@@ -1537,7 +1562,8 @@ app.post('/auto-drafts/:id/decline', authMiddleware.authenticate, async (req, re
         meetingType: context.meetingRequest.type || 'regular',
         urgencyLevel: context.meetingRequest.urgency || 'medium'
       },
-      declineReason: reason.trim()
+      declineReason: reason.trim(),
+      userName: userName || undefined // Pass user's name to AI (or undefined if not set)
     };
 
     // Generate decline response using AI service (with fallback)
@@ -1554,7 +1580,7 @@ app.post('/auto-drafts/:id/decline', authMiddleware.authenticate, async (req, re
     if (declineResponse.fallbackUsed || !finalResponseText || finalResponseText.length < 20) {
       console.warn('⚠️ [DECLINE] AI generation failed, using template fallback');
 
-      const generateDeclineTemplate = (tone: string, reason: string): string => {
+      const generateDeclineTemplate = (tone: string, reason: string, name: string): string => {
         const greeting = tone === 'casual' ? 'Hi,' : 'Hello,';
         const closing = tone === 'casual' ? 'Best,' : 'Best regards,';
 
@@ -1564,14 +1590,31 @@ Thank you for your meeting invitation. Unfortunately, I won't be able to make it
 
 I appreciate you thinking of me, and I hope we can connect another time.
 
-${closing}`;
+${closing}${name ? '\n' + name : ''}`;
       };
 
-      finalResponseText = generateDeclineTemplate(userTone, reason);
+      finalResponseText = generateDeclineTemplate(userTone, reason, userName);
       wasAIGenerated = false;
       console.log(`📝 [DECLINE] Using template fallback (${finalResponseText.length} chars)`);
     } else {
       console.log(`✅ [DECLINE] AI generated response (${finalResponseText.length} chars, confidence: ${declineResponse.confidence})`);
+    }
+
+    // Safety: Remove any placeholder text if AI still included it
+    if (userName) {
+      finalResponseText = finalResponseText
+        .replace(/\[Your [Nn]ame\]/g, userName)
+        .replace(/\[your [Nn]ame\]/g, userName);
+
+      // Log if we had to do replacement (means AI didn't follow instructions)
+      if (finalResponseText.includes('[Your') || finalResponseText.includes('[your')) {
+        console.warn('⚠️ [DECLINE] AI included placeholder despite instructions - replaced with actual name');
+      }
+    } else {
+      // If no userName, just remove the placeholder entirely
+      finalResponseText = finalResponseText
+        .replace(/\[Your [Nn]ame\]\n?/g, '')
+        .replace(/\[your [Nn]ame\]\n?/g, '');
     }
 
     // Create new decline draft

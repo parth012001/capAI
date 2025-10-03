@@ -7,15 +7,17 @@ interface DashboardTabsProps {
   activeTab: DashboardTab;
   onTabChange: (tab: DashboardTab) => void;
   unreadPromotionalCount?: number;
+  pendingDraftCount?: number;
 }
 
-export function DashboardTabs({ activeTab, onTabChange, unreadPromotionalCount = 0 }: DashboardTabsProps) {
+export function DashboardTabs({ activeTab, onTabChange, unreadPromotionalCount = 0, pendingDraftCount = 0 }: DashboardTabsProps) {
   const tabs = [
     {
       id: 'active' as DashboardTab,
       label: 'Active Emails',
       icon: Mail,
-      description: 'Business emails with AI-generated drafts'
+      description: 'Business emails with AI-generated drafts',
+      badge: pendingDraftCount > 0 ? pendingDraftCount : undefined
     },
     {
       id: 'promotional' as DashboardTab,
