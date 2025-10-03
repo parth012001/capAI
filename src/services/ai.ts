@@ -286,15 +286,24 @@ Return ONLY a number between 1-100.`;
   async classifyEmail(subject: string, body: string, fromEmail: string): Promise<'personal' | 'newsletter'> {
     try {
       console.log(`🤖 AI classifying email: "${subject}" from ${fromEmail}`);
-      
-      const prompt = `Classify this email as either "personal" or "newsletter":
+
+      const prompt = `Classify this email as either "personal" or "newsletter".
+
+MEETING REQUEST SIGNALS (always classify as PERSONAL):
+- Specific times mentioned: "Wednesday at 3 PM", "tomorrow at 2pm", "next Tuesday 10am"
+- Scheduling language: "scheduled", "booked", "set up for", "let's meet", "I've scheduled us"
+- Meeting nouns: "meeting", "call", "review", "sync", "discussion", "catch-up", "prep"
+- Calendar language: "I've added", "calendar invite", "on my calendar"
+- Confirmation requests: "Does this work?", "Are you available?", "Let me know"
 
 PERSONAL emails are:
 - Direct business communication requiring response
 - Personal messages from individuals
-- Collaboration requests, meeting invites
+- Meeting invites and scheduling (any future meetings with specific times)
+- Collaboration requests
 - Customer inquiries or support requests
 - Business proposals or partnerships
+- Direct questions requiring personal response
 
 NEWSLETTER emails are:
 - Mass marketing campaigns
@@ -302,6 +311,52 @@ NEWSLETTER emails are:
 - Company newsletters sent to many recipients
 - Advertising or sales pitches
 - Emails with unsubscribe links meant for masses
+- Generic event invitations without personalization
+
+EXAMPLES:
+
+Example 1 - PERSONAL:
+Subject: "UX Review - Wednesday at 3 PM"
+Body: "Hi, I've scheduled us for a UX review..."
+Classification: personal (specific time + meeting context)
+
+Example 2 - NEWSLETTER:
+Subject: "Weekly Marketing Newsletter - This Week's Tips!"
+Body: "Here are this week's marketing insights... Unsubscribe here"
+Classification: newsletter (mass marketing with unsubscribe link)
+
+Example 3 - PERSONAL:
+Subject: "Quick question about the project"
+Body: "Hey, can you clarify the requirements for..."
+Classification: personal (direct question requiring personal response)
+
+Example 4 - PERSONAL:
+Subject: "Investor Pitch Prep - Thursday Morning"
+Body: "Looking forward to prepping for the pitch on Thursday..."
+Classification: personal (future meeting with scheduling language)
+
+Example 5 - NEWSLETTER:
+Subject: "Don't miss our webinar at 3 PM EST!"
+Body: "Join us for an exclusive webinar... Register now!"
+Classification: newsletter (mass invitation, generic CTA)
+
+Example 6 - PERSONAL:
+Subject: "Can we move our 3 PM call?"
+Body: "Something came up, can we reschedule our call..."
+Classification: personal (modification of existing scheduled event)
+
+TRICKY CASES:
+- "Thanks for attending our webinar on Tuesday" = newsletter (PAST event, mass audience)
+- "Our meeting Tuesday went great!" = personal (PAST meeting recap to individual)
+- "Schedule your free consultation today!" = newsletter (generic CTA, no specific time)
+- "I scheduled us for 2pm tomorrow" = personal (specific future time, individualized)
+
+CLASSIFICATION RULES (apply in order):
+1. If contains specific date + time combo directed at recipient → personal
+2. If modifies existing meeting ("reschedule", "move our call") → personal
+3. If direct question requiring personal response → personal
+4. If has unsubscribe links or mass marketing language → newsletter
+5. If uncertain, default to personal (better to process than miss important emails)
 
 Email Details:
 From: ${fromEmail}
@@ -311,10 +366,10 @@ Body: ${body.substring(0, 800)}
 Respond with ONLY one word: "personal" or "newsletter"`;
 
       const response = await this.openai.chat.completions.create({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 5,
-        temperature: 0.1,
+        temperature: 0.0,
       });
 
       const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
