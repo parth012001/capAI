@@ -162,9 +162,10 @@ app.get('/auth/signin', (req, res) => {
 });
 
 app.get('/auth/callback', async (req, res) => {
+  const frontendUrl = env.FRONTEND_URL || (env.NODE_ENV === 'development' ? 'http://localhost:5173' : 'https://cap-ai-puce.vercel.app');
+
   try {
     const { code, state } = req.query;
-    const frontendUrl = env.FRONTEND_URL || (env.NODE_ENV === 'development' ? 'http://localhost:5173' : 'https://cap-ai-puce.vercel.app');
 
     if (!code) {
       // Redirect to frontend with error
