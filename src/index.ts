@@ -164,9 +164,11 @@ app.get('/auth/signin', (req, res) => {
 app.get('/auth/callback', async (req, res) => {
   try {
     const { code, state } = req.query;
+    const frontendUrl = env.FRONTEND_URL || (env.NODE_ENV === 'development' ? 'http://localhost:5173' : 'https://cap-ai-puce.vercel.app');
+
     if (!code) {
       // Redirect to frontend with error
-      return res.redirect(`http://localhost:5173/auth/callback?error=no_code`);
+      return res.redirect(`${frontendUrl}/auth/callback?error=no_code`);
     }
 
     // Extract intent from state parameter
@@ -196,12 +198,12 @@ app.get('/auth/callback', async (req, res) => {
         
         if (intent === 'signin' && !existingUser) {
           console.log(`❌ Sign in failed: User ${gmailAddress} does not exist`);
-          return res.redirect(`http://localhost:5173/auth/callback?error=user_not_found&email=${encodeURIComponent(gmailAddress)}`);
+          return res.redirect(`${frontendUrl}/auth/callback?error=user_not_found&email=${encodeURIComponent(gmailAddress)}`);
         }
-        
+
         if (intent === 'signup' && existingUser) {
           console.log(`❌ Sign up failed: User ${gmailAddress} already exists`);
-          return res.redirect(`http://localhost:5173/auth/callback?error=user_exists&email=${encodeURIComponent(gmailAddress)}`);
+          return res.redirect(`${frontendUrl}/auth/callback?error=user_exists&email=${encodeURIComponent(gmailAddress)}`);
         }
         
         console.log(`✅ Intent validation passed for ${intent || 'no-intent'}: ${gmailAddress}`);
@@ -249,18 +251,18 @@ app.get('/auth/callback', async (req, res) => {
         })).toString('base64');
         
         // Redirect to frontend with JWT token and onboarding info
-        res.redirect(`http://localhost:5173/auth/callback?success=true&tokens=${encodeURIComponent(authData)}`);
+        res.redirect(`${frontendUrl}/auth/callback?success=true&tokens=${encodeURIComponent(authData)}`);
       } else {
         throw new Error('Missing Gmail address or refresh token');
       }
     } catch (error) {
       console.error('⚠️ Failed to complete user setup:', error);
-      res.redirect(`http://localhost:5173/auth/callback?error=auth_failed`);
+      res.redirect(`${frontendUrl}/auth/callback?error=auth_failed`);
     }
   } catch (error) {
     console.error('❌ Authorization failed:', error);
     // Redirect to frontend with error
-    res.redirect(`http://localhost:5173/auth/callback?error=auth_failed`);
+    res.redirect(`${frontendUrl}/auth/callback?error=auth_failed`);
   }
 });
 

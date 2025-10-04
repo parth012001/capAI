@@ -44,9 +44,9 @@ export default function AuthCallback() {
             
             // Check if user needs onboarding (based on backend data)
             if (decodedTokens.needs_onboarding) {
-              console.log('🆕 New user or incomplete onboarding - redirecting to profile setup');
+              console.log('🆕 New user or incomplete onboarding - redirecting to onboarding');
               setTimeout(() => {
-                window.location.href = '/profile-setup';
+                window.location.href = '/onboarding';
               }, 1500);
             } else {
               console.log('✅ Existing user with complete profile - redirecting to dashboard');
