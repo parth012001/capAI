@@ -59,9 +59,9 @@ app.use(express.json({ limit: '10mb' }));
 // Enable CORS for frontend (conditionally)
 if (features.enableCORS) {
   app.use(cors({
-    origin: env.NODE_ENV === 'development' 
+    origin: env.FRONTEND_URL || (env.NODE_ENV === 'development'
       ? 'http://localhost:5173'
-      : 'https://chief-phi.vercel.app',
+      : 'https://cap-ai-puce.vercel.app'),
     credentials: true
   }));
 }

@@ -7,24 +7,25 @@ export interface EnvironmentConfig {
   // Server Configuration
   NODE_ENV: 'development' | 'production' | 'test';
   PORT: number;
-  
+
   // Database Configuration
   DATABASE_URL: string;
-  
+
   // Google OAuth Configuration
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   GOOGLE_REDIRECT_URI: string;
-  
+
   // OpenAI Configuration
   OPENAI_API_KEY: string;
-  
+
   // JWT Configuration
   JWT_SECRET: string;
-  
+
   // Optional Configuration
   LOG_LEVEL?: 'debug' | 'info' | 'warn' | 'error';
   WEBHOOK_RENEWAL_INTERVAL?: number; // in hours
+  FRONTEND_URL?: string;
 }
 
 /**
@@ -98,7 +99,8 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY!,
     JWT_SECRET: jwtSecret,
     LOG_LEVEL: logLevel as 'debug' | 'info' | 'warn' | 'error',
-    WEBHOOK_RENEWAL_INTERVAL: parseInt(process.env.WEBHOOK_RENEWAL_INTERVAL || '6', 10)
+    WEBHOOK_RENEWAL_INTERVAL: parseInt(process.env.WEBHOOK_RENEWAL_INTERVAL || '6', 10),
+    FRONTEND_URL: process.env.FRONTEND_URL
   };
 
   // Log configuration summary (without sensitive data)
