@@ -594,8 +594,8 @@ CREATE TABLE IF NOT EXISTS tone_profiles (
 
 -- Table: user_gmail_tokens
 CREATE TABLE IF NOT EXISTS user_gmail_tokens (
-    user_id VARCHAR(255) NOT NULL,
-    gmail_address VARCHAR(255) NOT NULL,
+    user_id VARCHAR(255) PRIMARY KEY,
+    gmail_address VARCHAR(255) NOT NULL UNIQUE,
     refresh_token_encrypted TEXT NOT NULL,
     access_token_encrypted TEXT,
     access_token_expires_at TIMESTAMP WITHOUT TIME ZONE,
