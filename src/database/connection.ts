@@ -25,8 +25,29 @@ export async function initializeDatabase() {
   try {
     const fs = require('fs');
     const path = require('path');
-    
-    // Initialize Phase 1 schema (ignore errors from existing indexes)
+
+    // Use complete working schema exported from local database
+    // This ensures Neon matches local exactly (39 tables, all columns)
+    const completeSchemaPath = path.join(__dirname, '../../scripts/database/complete_working_schema.sql');
+
+    if (fs.existsSync(completeSchemaPath)) {
+      console.log('📥 Loading complete working schema...');
+      const completeSchema = fs.readFileSync(completeSchemaPath, 'utf8');
+      try {
+        await pool.query(completeSchema);
+        console.log('✅ Database schema initialized (Complete Working Schema - 39 tables)');
+        return true;
+      } catch (error: any) {
+        // Ignore "already exists" errors
+        if (error.code === '42P07' || error.code === '42710' || error.code === '42P06') {
+          console.log('✅ Database schema already initialized');
+          return true;
+        }
+        throw error;
+      }
+    }
+
+    // Fallback to old phase-based initialization if complete schema not found
     const schemaPath = path.join(__dirname, '../../scripts/database/schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
     try {
