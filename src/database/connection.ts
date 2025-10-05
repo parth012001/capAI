@@ -36,15 +36,30 @@ export async function initializeDatabase() {
       try {
         await pool.query(completeSchema);
         console.log('✅ Database schema initialized (Complete Working Schema - 39 tables)');
-        return true;
       } catch (error: any) {
         // Ignore "already exists" errors
         if (error.code === '42P07' || error.code === '42710' || error.code === '42P06') {
           console.log('✅ Database schema already initialized');
-          return true;
+        } else {
+          throw error;
         }
-        throw error;
       }
+
+      // Apply constraint fixes for existing tables
+      const constraintFixPath = path.join(__dirname, '../../scripts/database/add_user_gmail_tokens_constraints.sql');
+      if (fs.existsSync(constraintFixPath)) {
+        console.log('🔧 Applying constraint fixes...');
+        const constraintFix = fs.readFileSync(constraintFixPath, 'utf8');
+        try {
+          await pool.query(constraintFix);
+          console.log('✅ Constraints verified/added');
+        } catch (error: any) {
+          console.log('⚠️  Constraint fix warning:', error.message);
+          // Don't fail on constraint errors - table might already be correct
+        }
+      }
+
+      return true;
     }
 
     // Fallback to old phase-based initialization if complete schema not found
