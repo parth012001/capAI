@@ -146,7 +146,20 @@ export async function initializeDatabase() {
       } catch (error: any) {
         if (error.code !== '42P07' && error.code !== '42710') throw error;
       }
-    } else if (fs.existsSync(phase3_3SchemaPath)) {
+    }
+
+    // Apply user_id column fixes (for multi-user support)
+    const userIdFixPath = path.join(__dirname, '../../scripts/database/add_missing_user_id_columns.sql');
+    if (fs.existsSync(userIdFixPath)) {
+      const userIdFix = fs.readFileSync(userIdFixPath, 'utf8');
+      try {
+        await pool.query(userIdFix);
+      } catch (error: any) {
+        if (error.code !== '42701') throw error; // Ignore "column already exists" errors
+      }
+    }
+
+    if (fs.existsSync(phase3_3SchemaPath)) {
       console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 + 2.4 + 3 + 3.3 Auto-Scheduling)');
     } else if (fs.existsSync(phase3CalendarSchemaPath)) {
       console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 + 2.4 + 3 Calendar Intelligence)');
