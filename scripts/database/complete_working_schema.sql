@@ -88,18 +88,19 @@ CREATE TABLE IF NOT EXISTS auto_scheduling_preferences (
 
 -- Table: availability_cache
 CREATE TABLE IF NOT EXISTS availability_cache (
-    id INTEGER DEFAULT nextval('availability_cache_id_seq'::regclass) NOT NULL,
+    id INTEGER DEFAULT nextval('availability_cache_id_seq'::regclass) PRIMARY KEY,
     date_key DATE NOT NULL,
     calendar_id VARCHAR(255) DEFAULT 'primary'::character varying,
     availability_data JSONB NOT NULL,
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    expires_at TIMESTAMP WITH TIME ZONE
+    expires_at TIMESTAMP WITH TIME ZONE,
+    UNIQUE (date_key, calendar_id)
 );
 
 -- Table: calendar_events
 CREATE TABLE IF NOT EXISTS calendar_events (
-    id INTEGER DEFAULT nextval('calendar_events_id_seq'::regclass) NOT NULL,
-    google_event_id VARCHAR(255) NOT NULL,
+    id INTEGER DEFAULT nextval('calendar_events_id_seq'::regclass) PRIMARY KEY,
+    google_event_id VARCHAR(255) NOT NULL UNIQUE,
     calendar_id VARCHAR(255) DEFAULT 'primary'::character varying,
     summary TEXT NOT NULL,
     description TEXT,
@@ -219,8 +220,8 @@ CREATE TABLE IF NOT EXISTS edit_analyses (
 
 -- Table: email_threads
 CREATE TABLE IF NOT EXISTS email_threads (
-    id INTEGER DEFAULT nextval('email_threads_id_seq'::regclass) NOT NULL,
-    thread_id VARCHAR(255) NOT NULL,
+    id INTEGER DEFAULT nextval('email_threads_id_seq'::regclass) PRIMARY KEY,
+    thread_id VARCHAR(255) NOT NULL UNIQUE,
     subject_line TEXT,
     participants TEXT[],
     participant_count INTEGER DEFAULT 0,
@@ -267,7 +268,7 @@ CREATE TABLE IF NOT EXISTS emails (
 
 -- Table: extracted_entities
 CREATE TABLE IF NOT EXISTS extracted_entities (
-    id INTEGER DEFAULT nextval('extracted_entities_id_seq'::regclass) NOT NULL,
+    id INTEGER DEFAULT nextval('extracted_entities_id_seq'::regclass) PRIMARY KEY,
     email_id INTEGER,
     thread_id VARCHAR(255),
     entity_type VARCHAR(50) NOT NULL,
@@ -368,7 +369,7 @@ CREATE TABLE IF NOT EXISTS meeting_confirmations (
 
 -- Table: meeting_processing_results
 CREATE TABLE IF NOT EXISTS meeting_processing_results (
-    id INTEGER DEFAULT nextval('meeting_processing_results_id_seq'::regclass) NOT NULL,
+    id INTEGER DEFAULT nextval('meeting_processing_results_id_seq'::regclass) PRIMARY KEY,
     email_db_id INTEGER NOT NULL,
     gmail_id VARCHAR(100) NOT NULL,
     user_id VARCHAR(100) NOT NULL,
@@ -377,12 +378,13 @@ CREATE TABLE IF NOT EXISTS meeting_processing_results (
     processing_time_ms INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'processed'::character varying NOT NULL,
     reason TEXT,
-    processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    processed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (email_db_id, user_id)
 );
 
 -- Table: meeting_requests
 CREATE TABLE IF NOT EXISTS meeting_requests (
-    id INTEGER DEFAULT nextval('meeting_requests_id_seq'::regclass) NOT NULL,
+    id INTEGER DEFAULT nextval('meeting_requests_id_seq'::regclass) PRIMARY KEY,
     email_id INTEGER,
     sender_email VARCHAR(255) NOT NULL,
     subject TEXT,
@@ -397,7 +399,8 @@ CREATE TABLE IF NOT EXISTS meeting_requests (
     status VARCHAR(50) DEFAULT 'pending'::character varying,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    user_id VARCHAR(100) DEFAULT 'default_user'::character varying NOT NULL
+    user_id VARCHAR(100) DEFAULT 'default_user'::character varying NOT NULL,
+    UNIQUE (email_id, user_id)
 );
 
 -- Table: meeting_responses
@@ -560,8 +563,8 @@ CREATE TABLE IF NOT EXISTS sender_profiles (
 
 -- Table: sent_emails
 CREATE TABLE IF NOT EXISTS sent_emails (
-    id INTEGER DEFAULT nextval('sent_emails_id_seq'::regclass) NOT NULL,
-    gmail_id VARCHAR(255) NOT NULL,
+    id INTEGER DEFAULT nextval('sent_emails_id_seq'::regclass) PRIMARY KEY,
+    gmail_id VARCHAR(255) NOT NULL UNIQUE,
     subject TEXT,
     body TEXT,
     to_email VARCHAR(255) NOT NULL,
