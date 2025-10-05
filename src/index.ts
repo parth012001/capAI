@@ -3744,109 +3744,6 @@ process.on('SIGINT', () => {
 
 // Start server
 initializeServices().then(() => {
-      app.listen(port, () => {
-        logger.info(`🌐 Chief AI server running on http://localhost:${port}`, {
-          environment: env.NODE_ENV,
-          port,
-          logLevel: env.LOG_LEVEL
-        });
-        logger.info('🔧 Server ready and accepting connections');
-        
-        if (env.NODE_ENV === 'development') {
-          console.log('\n📋 Available endpoints:');
-          console.log('   GET  /health               - Health check');
-          console.log('   GET  /health/ready         - Readiness probe');
-          console.log('   GET  /auth                 - Start OAuth flow');
-        console.log('   GET  /auth/callback        - OAuth callback');
-        console.log('   GET  /emails/fetch         - Fetch emails from Gmail');
-        console.log('   GET  /emails               - View stored emails');
-        console.log('\n🤖 Phase 2.1 - Real Email Analysis:');
-        console.log('   POST /ai/analyze-tone-real - Analyze tone from real sent emails');
-        console.log('   POST /ai/analyze-tone      - Analyze tone (mock fallback)');
-        console.log('   GET  /tone-profiles        - View tone profile history');
-        console.log('   GET  /tone-profiles/:id    - View specific tone profile');
-        console.log('   POST /ai/refresh-tone      - Manually refresh tone analysis');
-        console.log('   POST /ai/categorize-emails - Categorize emails');
-        console.log('   POST /ai/generate-drafts   - Generate AI drafts');
-        console.log('   GET  /drafts               - View generated drafts');
-        console.log('   GET  /drafts/:id           - View specific draft');
-        
-        console.log('\n🚀 Phase 1 - Real-time Auto-Generated Drafts:');
-        console.log('   GET    /auto-drafts         - List auto-generated drafts with pagination');
-        console.log('   GET    /auto-drafts/:id     - Get specific auto-generated draft');
-        console.log('   PUT    /auto-drafts/:id     - Edit draft content (triggers learning)');
-        console.log('   POST   /auto-drafts/:id/send     - Send draft as actual email');
-        console.log('   DELETE /auto-drafts/:id     - Delete unwanted draft');
-        console.log('   POST   /auto-drafts/:id/approve  - Approve draft without changes');
-        
-        console.log('\n🔔 Webhook Management:');
-        console.log('   GET    /webhook-status           - Check webhook status for all users');
-        console.log('   POST   /webhook-renewal/manual   - Manually trigger webhook renewal check');
-        
-        console.log('\n🧪 Webhook Testing:');
-        console.log('   POST   /test/webhook-suite       - Run comprehensive webhook test suite');
-        console.log('   GET    /test/webhook-health      - Quick webhook health check');
-        
-        console.log('\n💡 Phase 2.1 workflow:');
-        console.log('   1. Real tone analysis: POST /ai/analyze-tone-real');
-        console.log('   2. View profiles: GET /tone-profiles');
-        console.log('   3. Refresh tone: POST /ai/refresh-tone');
-        console.log('   4. Categorize: POST /ai/categorize-emails');
-        console.log('   5. Generate drafts: POST /ai/generate-drafts');
-        console.log('   6. Review: GET /drafts');
-        console.log('\n🧠 Phase 2.2 - Deep Context Intelligence:');
-        console.log('   POST /context/analyze-emails     - Run context analysis on emails');
-        console.log('   GET  /context/stats              - Context intelligence statistics');
-        console.log('   GET  /context/threads            - Thread analytics');
-        console.log('   GET  /context/senders            - Sender relationship insights');
-        console.log('   GET  /context/entities           - Entity extraction insights');
-        console.log('   GET  /context/thread/:id         - Full thread context');
-        console.log('   GET  /context/health             - Context system health');
-        console.log('   POST /ai/generate-drafts-with-context - Context-aware draft generation');
-
-        console.log('\n🤖 Phase 2.3 - Smart Response Generation:');
-        console.log('   POST /response/generate-smart    - Generate intelligent responses with context');
-        console.log('   GET  /response/templates         - Get response templates by context');
-        console.log('   GET  /response/stats             - Response generation statistics');
-        console.log('   GET  /response/recent            - Recent generated responses');
-        console.log('   POST /response/feedback          - Record user feedback on responses');
-
-        console.log('\n🎓 Phase 2.4 - Learning & Feedback System:');
-        console.log('   POST /learning/analyze-edit      - Analyze user edits for learning');
-        console.log('   GET  /learning/success-metrics   - Calculate success rates and trends');
-        console.log('   GET  /learning/insights          - Generate learning insights from patterns');
-        console.log('   GET  /learning/performance-trend - Weekly performance trend analysis');
-        console.log('   POST /learning/weekly-analysis   - Comprehensive weekly performance report');
-
-        console.log('\n📅 Phase 3.1 - Calendar Intelligence:');
-        console.log('   POST /calendar/set-tokens        - Set OAuth tokens for Calendar API');
-        console.log('   GET  /calendar/events            - Get calendar events for date range');  
-        console.log('   POST /calendar/check-availability - Just-in-time availability checking');
-        console.log('   POST /calendar/suggest-times     - Smart time slot suggestions');
-        console.log('   POST /calendar/create-event      - Create calendar events');
-        console.log('   GET  /calendar/preferences       - Get user calendar preferences');
-        console.log('   POST /calendar/preferences       - Update calendar preferences');
-        console.log('   GET  /calendar/stats             - Calendar analytics and statistics');
-        console.log('   GET  /calendar/health            - Calendar system health check');
-
-        console.log('\n🤖 Phase 3.2 - Meeting Request Detection:');
-        console.log('   POST /meetings/detect            - Detect meeting request in specific email');
-        console.log('   POST /meetings/scan-emails       - Scan recent emails for meeting requests');
-        console.log('   GET  /meetings/requests          - Get all meeting requests');
-        console.log('   PATCH /meetings/requests/:id     - Update meeting request status');
-        console.log('   GET  /meetings/health            - Meeting detection system health check');
-
-        console.log('\n🔄 Phase 3.3 - Auto-Scheduling System:');
-        console.log('   POST /auto-scheduling/process-meeting  - Process meeting request for auto-scheduling');
-        console.log('   POST /auto-scheduling/suggest-times    - Generate time slot suggestions');
-        console.log('   POST /auto-scheduling/create-hold      - Create calendar hold for time slot');
-        console.log('   POST /auto-scheduling/confirm          - Confirm scheduling and create calendar event');
-        console.log('   GET  /auto-scheduling/workflows       - Get scheduling workflows');
-        console.log('   GET  /auto-scheduling/holds           - Get calendar holds');
-        console.log('   POST /auto-scheduling/cleanup-holds   - Cleanup expired calendar holds');
-        console.log('   GET  /auto-scheduling/health          - Auto-scheduling system health check');
-
-
         // 📡 Gmail Webhook Endpoints
     
     // Webhook heartbeat tracking (for status monitoring)
@@ -4798,6 +4695,110 @@ initializeServices().then(() => {
         res.status(500).json({ error: 'Failed to stop webhook' });
       }
     });
+
+
+      app.listen(port, () => {
+        logger.info(`🌐 Chief AI server running on http://localhost:${port}`, {
+          environment: env.NODE_ENV,
+          port,
+          logLevel: env.LOG_LEVEL
+        });
+        logger.info('🔧 Server ready and accepting connections');
+        
+        if (env.NODE_ENV === 'development') {
+          console.log('\n📋 Available endpoints:');
+          console.log('   GET  /health               - Health check');
+          console.log('   GET  /health/ready         - Readiness probe');
+          console.log('   GET  /auth                 - Start OAuth flow');
+        console.log('   GET  /auth/callback        - OAuth callback');
+        console.log('   GET  /emails/fetch         - Fetch emails from Gmail');
+        console.log('   GET  /emails               - View stored emails');
+        console.log('\n🤖 Phase 2.1 - Real Email Analysis:');
+        console.log('   POST /ai/analyze-tone-real - Analyze tone from real sent emails');
+        console.log('   POST /ai/analyze-tone      - Analyze tone (mock fallback)');
+        console.log('   GET  /tone-profiles        - View tone profile history');
+        console.log('   GET  /tone-profiles/:id    - View specific tone profile');
+        console.log('   POST /ai/refresh-tone      - Manually refresh tone analysis');
+        console.log('   POST /ai/categorize-emails - Categorize emails');
+        console.log('   POST /ai/generate-drafts   - Generate AI drafts');
+        console.log('   GET  /drafts               - View generated drafts');
+        console.log('   GET  /drafts/:id           - View specific draft');
+        
+        console.log('\n🚀 Phase 1 - Real-time Auto-Generated Drafts:');
+        console.log('   GET    /auto-drafts         - List auto-generated drafts with pagination');
+        console.log('   GET    /auto-drafts/:id     - Get specific auto-generated draft');
+        console.log('   PUT    /auto-drafts/:id     - Edit draft content (triggers learning)');
+        console.log('   POST   /auto-drafts/:id/send     - Send draft as actual email');
+        console.log('   DELETE /auto-drafts/:id     - Delete unwanted draft');
+        console.log('   POST   /auto-drafts/:id/approve  - Approve draft without changes');
+        
+        console.log('\n🔔 Webhook Management:');
+        console.log('   GET    /webhook-status           - Check webhook status for all users');
+        console.log('   POST   /webhook-renewal/manual   - Manually trigger webhook renewal check');
+        
+        console.log('\n🧪 Webhook Testing:');
+        console.log('   POST   /test/webhook-suite       - Run comprehensive webhook test suite');
+        console.log('   GET    /test/webhook-health      - Quick webhook health check');
+        
+        console.log('\n💡 Phase 2.1 workflow:');
+        console.log('   1. Real tone analysis: POST /ai/analyze-tone-real');
+        console.log('   2. View profiles: GET /tone-profiles');
+        console.log('   3. Refresh tone: POST /ai/refresh-tone');
+        console.log('   4. Categorize: POST /ai/categorize-emails');
+        console.log('   5. Generate drafts: POST /ai/generate-drafts');
+        console.log('   6. Review: GET /drafts');
+        console.log('\n🧠 Phase 2.2 - Deep Context Intelligence:');
+        console.log('   POST /context/analyze-emails     - Run context analysis on emails');
+        console.log('   GET  /context/stats              - Context intelligence statistics');
+        console.log('   GET  /context/threads            - Thread analytics');
+        console.log('   GET  /context/senders            - Sender relationship insights');
+        console.log('   GET  /context/entities           - Entity extraction insights');
+        console.log('   GET  /context/thread/:id         - Full thread context');
+        console.log('   GET  /context/health             - Context system health');
+        console.log('   POST /ai/generate-drafts-with-context - Context-aware draft generation');
+
+        console.log('\n🤖 Phase 2.3 - Smart Response Generation:');
+        console.log('   POST /response/generate-smart    - Generate intelligent responses with context');
+        console.log('   GET  /response/templates         - Get response templates by context');
+        console.log('   GET  /response/stats             - Response generation statistics');
+        console.log('   GET  /response/recent            - Recent generated responses');
+        console.log('   POST /response/feedback          - Record user feedback on responses');
+
+        console.log('\n🎓 Phase 2.4 - Learning & Feedback System:');
+        console.log('   POST /learning/analyze-edit      - Analyze user edits for learning');
+        console.log('   GET  /learning/success-metrics   - Calculate success rates and trends');
+        console.log('   GET  /learning/insights          - Generate learning insights from patterns');
+        console.log('   GET  /learning/performance-trend - Weekly performance trend analysis');
+        console.log('   POST /learning/weekly-analysis   - Comprehensive weekly performance report');
+
+        console.log('\n📅 Phase 3.1 - Calendar Intelligence:');
+        console.log('   POST /calendar/set-tokens        - Set OAuth tokens for Calendar API');
+        console.log('   GET  /calendar/events            - Get calendar events for date range');  
+        console.log('   POST /calendar/check-availability - Just-in-time availability checking');
+        console.log('   POST /calendar/suggest-times     - Smart time slot suggestions');
+        console.log('   POST /calendar/create-event      - Create calendar events');
+        console.log('   GET  /calendar/preferences       - Get user calendar preferences');
+        console.log('   POST /calendar/preferences       - Update calendar preferences');
+        console.log('   GET  /calendar/stats             - Calendar analytics and statistics');
+        console.log('   GET  /calendar/health            - Calendar system health check');
+
+        console.log('\n🤖 Phase 3.2 - Meeting Request Detection:');
+        console.log('   POST /meetings/detect            - Detect meeting request in specific email');
+        console.log('   POST /meetings/scan-emails       - Scan recent emails for meeting requests');
+        console.log('   GET  /meetings/requests          - Get all meeting requests');
+        console.log('   PATCH /meetings/requests/:id     - Update meeting request status');
+        console.log('   GET  /meetings/health            - Meeting detection system health check');
+
+        console.log('\n🔄 Phase 3.3 - Auto-Scheduling System:');
+        console.log('   POST /auto-scheduling/process-meeting  - Process meeting request for auto-scheduling');
+        console.log('   POST /auto-scheduling/suggest-times    - Generate time slot suggestions');
+        console.log('   POST /auto-scheduling/create-hold      - Create calendar hold for time slot');
+        console.log('   POST /auto-scheduling/confirm          - Confirm scheduling and create calendar event');
+        console.log('   GET  /auto-scheduling/workflows       - Get scheduling workflows');
+        console.log('   GET  /auto-scheduling/holds           - Get calendar holds');
+        console.log('   POST /auto-scheduling/cleanup-holds   - Cleanup expired calendar holds');
+        console.log('   GET  /auto-scheduling/health          - Auto-scheduling system health check');
+
 
     console.log('\n🔍 System Monitoring:');
         console.log('   GET  /health/email-parsing  - Check parsing health');
