@@ -46,16 +46,29 @@ export async function initializeDatabase() {
       }
 
       // Apply constraint fixes for existing tables
-      const constraintFixPath = path.join(__dirname, '../../scripts/database/add_user_gmail_tokens_constraints.sql');
-      if (fs.existsSync(constraintFixPath)) {
-        console.log('🔧 Applying constraint fixes...');
-        const constraintFix = fs.readFileSync(constraintFixPath, 'utf8');
+      console.log('🔧 Applying constraint fixes...');
+
+      // Fix user_gmail_tokens constraints
+      const userTokensFixPath = path.join(__dirname, '../../scripts/database/add_user_gmail_tokens_constraints.sql');
+      if (fs.existsSync(userTokensFixPath)) {
+        const userTokensFix = fs.readFileSync(userTokensFixPath, 'utf8');
         try {
-          await pool.query(constraintFix);
-          console.log('✅ Constraints verified/added');
+          await pool.query(userTokensFix);
+          console.log('✅ User tokens constraints verified/added');
         } catch (error: any) {
-          console.log('⚠️  Constraint fix warning:', error.message);
-          // Don't fail on constraint errors - table might already be correct
+          console.log('⚠️  User tokens constraint warning:', error.message);
+        }
+      }
+
+      // Fix emails and promotional_emails constraints
+      const emailsFixPath = path.join(__dirname, '../../scripts/database/add_emails_constraints.sql');
+      if (fs.existsSync(emailsFixPath)) {
+        const emailsFix = fs.readFileSync(emailsFixPath, 'utf8');
+        try {
+          await pool.query(emailsFix);
+          console.log('✅ Emails constraints verified/added');
+        } catch (error: any) {
+          console.log('⚠️  Emails constraint warning:', error.message);
         }
       }
 

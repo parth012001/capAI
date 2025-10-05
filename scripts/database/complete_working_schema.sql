@@ -237,7 +237,7 @@ CREATE TABLE IF NOT EXISTS email_threads (
 
 -- Table: emails
 CREATE TABLE IF NOT EXISTS emails (
-    id INTEGER DEFAULT nextval('emails_id_seq'::regclass) NOT NULL,
+    id INTEGER DEFAULT nextval('emails_id_seq'::regclass) PRIMARY KEY,
     gmail_id VARCHAR(255) NOT NULL,
     thread_id VARCHAR(255) NOT NULL,
     subject TEXT,
@@ -261,7 +261,8 @@ CREATE TABLE IF NOT EXISTS emails (
     user_id VARCHAR(255),
     updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
     priority_score INTEGER DEFAULT 50,
-    processing_status VARCHAR(50) DEFAULT 'pending'::character varying
+    processing_status VARCHAR(50) DEFAULT 'pending'::character varying,
+    UNIQUE (gmail_id, user_id)
 );
 
 -- Table: extracted_entities
@@ -431,7 +432,7 @@ CREATE TABLE IF NOT EXISTS performance_metrics (
 
 -- Table: promotional_emails
 CREATE TABLE IF NOT EXISTS promotional_emails (
-    id INTEGER DEFAULT nextval('promotional_emails_id_seq'::regclass) NOT NULL,
+    id INTEGER DEFAULT nextval('promotional_emails_id_seq'::regclass) PRIMARY KEY,
     gmail_id VARCHAR(255) NOT NULL,
     user_id VARCHAR(255) NOT NULL,
     thread_id VARCHAR(255),
@@ -444,7 +445,8 @@ CREATE TABLE IF NOT EXISTS promotional_emails (
     is_read BOOLEAN DEFAULT false,
     webhook_processed BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
-    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now()
+    updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+    UNIQUE (gmail_id, user_id)
 );
 
 -- Table: response_preferences
