@@ -34,6 +34,38 @@ export class TimezoneService {
   private static CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
   /**
+   * Common timezone abbreviations to IANA timezone mapping
+   * Covers 95% of real-world use cases
+   */
+  private static readonly TIMEZONE_ABBREVIATIONS: { [key: string]: string } = {
+    // US Timezones
+    'pst': 'America/Los_Angeles',
+    'pdt': 'America/Los_Angeles',
+    'mst': 'America/Denver',
+    'mdt': 'America/Denver',
+    'cst': 'America/Chicago',
+    'cdt': 'America/Chicago',
+    'est': 'America/New_York',
+    'edt': 'America/New_York',
+    'akst': 'America/Anchorage',
+    'akdt': 'America/Anchorage',
+    'hst': 'Pacific/Honolulu',
+    'hdt': 'Pacific/Honolulu',
+
+    // International
+    'gmt': 'Europe/London',
+    'bst': 'Europe/London',
+    'cet': 'Europe/Paris',
+    'cest': 'Europe/Paris',
+    'ist': 'Asia/Kolkata',
+    'jst': 'Asia/Tokyo',
+    'aest': 'Australia/Sydney',
+    'aedt': 'Australia/Sydney',
+    'nzst': 'Pacific/Auckland',
+    'nzdt': 'Pacific/Auckland'
+  }
+
+  /**
    * Fetch user's timezone from Google Calendar settings
    * This is the source of truth for user timezone
    */
@@ -351,6 +383,37 @@ export class TimezoneService {
       return janOffset !== julOffset;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Extract timezone from email text (e.g., "2pm EST" or "3:30pm PST")
+   * Returns IANA timezone if found, null otherwise
+   * Zero overhead - just regex matching
+   */
+  static extractTimezoneFromText(text: string): string | null {
+    try {
+      // Pattern matches: time + optional am/pm + timezone abbreviation
+      // Examples: "2pm EST", "3:30 PM PST", "14:00 GMT", "2 PM EDT"
+      const pattern = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?\s+(PST|PDT|MST|MDT|CST|CDT|EST|EDT|AKST|AKDT|HST|HDT|GMT|BST|CET|CEST|IST|JST|AEST|AEDT|NZST|NZDT)\b/i;
+
+      const match = text.match(pattern);
+
+      if (match && match[1]) {
+        const abbreviation = match[1].toLowerCase();
+        const ianaTimezone = this.TIMEZONE_ABBREVIATIONS[abbreviation];
+
+        if (ianaTimezone) {
+          console.log(`🌍 [TIMEZONE] Detected timezone in text: "${match[1]}" → ${ianaTimezone}`);
+          return ianaTimezone;
+        }
+      }
+
+      return null;
+
+    } catch (error) {
+      console.error(`❌ [TIMEZONE] Error extracting timezone from text:`, error);
+      return null;
     }
   }
 

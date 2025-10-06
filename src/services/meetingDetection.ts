@@ -38,10 +38,13 @@ export class MeetingDetectionService {
   }
 
   // Main detection method - analyzes if email contains a meeting request
-  async detectMeetingRequest(email: ParsedEmail): Promise<MeetingRequest | null> {
+  async detectMeetingRequest(email: ParsedEmail, userTimezone: string | null = null): Promise<MeetingRequest | null> {
     try {
       console.log(`🔍 Analyzing email for meeting request: "${email.subject}"`);
-      
+      if (userTimezone) {
+        console.log(`🌍 [MEETING DETECTION] Using user timezone: ${userTimezone}`);
+      }
+
       // Quick keyword filtering to avoid unnecessary AI calls
       if (!this.hasSchedulingKeywords(email.body)) {
         console.log('❌ No scheduling keywords found');
@@ -50,16 +53,16 @@ export class MeetingDetectionService {
 
       // AI-powered meeting intent analysis
       const intent = await this.analyzeMeetingIntent(email.body);
-      
+
       if (!intent.isMeetingRequest || intent.confidence < 0.6) {
         console.log(`❌ Not a meeting request (confidence: ${intent.confidence})`);
         return null;
       }
 
       console.log(`✅ Meeting request detected (confidence: ${intent.confidence})`);
-      
-      // Extract detailed meeting information
-      const meetingDetails = await this.extractMeetingDetails(email.body, intent);
+
+      // Extract detailed meeting information with user's timezone
+      const meetingDetails = await this.extractMeetingDetails(email.body, intent, userTimezone);
 
       // Check if specific times are mentioned
       const hasSpecificTimes = this.hasSpecificTimesMentioned(email.body, meetingDetails.preferredDates);
@@ -185,7 +188,7 @@ Respond with JSON:
   }
 
   // Extract structured meeting details from email body
-  private async extractMeetingDetails(emailBody: string, intent: MeetingIntent): Promise<{
+  private async extractMeetingDetails(emailBody: string, intent: MeetingIntent, userTimezone: string | null = null): Promise<{
     duration?: number;
     preferredDates?: string[];
     attendees?: string[];
@@ -198,9 +201,10 @@ Respond with JSON:
         intent.extractedDetails.duration || emailBody
       );
 
-      // Extract dates/times mentioned
+      // Extract dates/times mentioned with user's timezone
       const preferredDates = this.extractPreferredDates(
-        intent.extractedDetails.timeFrame || emailBody
+        intent.extractedDetails.timeFrame || emailBody,
+        userTimezone
       );
 
       // Get attendees from intent or parse email
@@ -272,14 +276,24 @@ Respond with JSON:
   }
 
   // Extract preferred dates/times from email and convert to actual dates
-  // ENHANCED: Now handles specific time ranges like "Monday 2-3 PM"
-  private extractPreferredDates(text: string): string[] {
+  // ENHANCED: Now handles specific time ranges like "Monday 2-3 PM" AND timezone detection
+  private extractPreferredDates(text: string, userTimezone: string | null = null): string[] {
     console.log(`🕐 [TIME PARSING] Analyzing text for dates and times: "${text.substring(0, 100)}..."`);
-    
+
+    // Stage 0: Detect explicit timezone from email text (e.g., "10 AM EST")
+    const detectedTimezone = this.extractTimezoneFromEmailText(text);
+    if (detectedTimezone) {
+      console.log(`🌍 [TIMEZONE DETECTION] Email mentions explicit timezone: ${detectedTimezone}`);
+    }
+
+    // Choose timezone: Explicit mention > User's calendar timezone > Default
+    const timezoneToUse = detectedTimezone || userTimezone || 'America/Los_Angeles';
+    console.log(`🌍 [TIMEZONE] Using timezone for conversion: ${timezoneToUse} (source: ${detectedTimezone ? 'explicit mention' : userTimezone ? 'user calendar' : 'default'})`);
+
     // Stage 1: Extract basic dates (keep your existing working system)
     const basicDates = this.extractBasicDatePatterns(text);
     console.log(`📅 [DATE EXTRACTION] Found basic dates:`, basicDates);
-    
+
     // Stage 2: NEW - Enhance each date with specific time information if available
     const datesWithTimes = basicDates.map(date => {
       const timeInfo = this.extractTimeForDate(text, date);
@@ -289,7 +303,7 @@ Respond with JSON:
       }
       return date;
     });
-    
+
     // Stage 3: Also look for standalone time expressions that imply "today"
     const standaloneTimeExpressions = this.extractStandaloneTimeExpressions(text);
     if (standaloneTimeExpressions.length > 0) {
@@ -297,11 +311,47 @@ Respond with JSON:
       datesWithTimes.push(...standaloneTimeExpressions);
     }
 
-    // Convert all enhanced dates to actual dates (your existing system)
-    const convertedDates = datesWithTimes.map(date => this.convertRelativeDate(date)).filter((date): date is string => date !== null);
-    
+    // Convert all enhanced dates to actual dates using the chosen timezone
+    const convertedDates = datesWithTimes.map(date => this.convertRelativeDate(date, timezoneToUse)).filter((date): date is string => date !== null);
+
     console.log(`✅ [TIME PARSING] Final extracted dates:`, convertedDates);
     return [...new Set(convertedDates)]; // Remove duplicates
+  }
+
+  /**
+   * Extract timezone from email text (e.g., "10 AM EST" or "2pm PST")
+   * NEW: Detects timezone BEFORE date conversion
+   */
+  private extractTimezoneFromEmailText(text: string): string | null {
+    // Pattern matches: time + optional am/pm + timezone abbreviation
+    // Examples: "10 AM EST", "2pm PST", "14:00 GMT", "3:30 PM EDT"
+    const pattern = /\b\d{1,2}(?::\d{2})?\s*(?:am|pm|AM|PM)?\s+(PST|PDT|MST|MDT|CST|CDT|EST|EDT|AKST|AKDT|HST|HDT|GMT|BST|CET|CEST|IST|JST|AEST|AEDT|NZST|NZDT)\b/i;
+
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const abbreviation = match[1].toUpperCase();
+      console.log(`🌍 [TIMEZONE DETECTION] Found timezone abbreviation in email: ${abbreviation}`);
+
+      // Map to IANA timezone
+      const timezoneMap: { [key: string]: string } = {
+        'PST': 'America/Los_Angeles', 'PDT': 'America/Los_Angeles',
+        'MST': 'America/Denver', 'MDT': 'America/Denver',
+        'CST': 'America/Chicago', 'CDT': 'America/Chicago',
+        'EST': 'America/New_York', 'EDT': 'America/New_York',
+        'AKST': 'America/Anchorage', 'AKDT': 'America/Anchorage',
+        'HST': 'Pacific/Honolulu', 'HDT': 'Pacific/Honolulu',
+        'GMT': 'Europe/London', 'BST': 'Europe/London',
+        'CET': 'Europe/Paris', 'CEST': 'Europe/Paris',
+        'IST': 'Asia/Kolkata',
+        'JST': 'Asia/Tokyo',
+        'AEST': 'Australia/Sydney', 'AEDT': 'Australia/Sydney',
+        'NZST': 'Pacific/Auckland', 'NZDT': 'Pacific/Auckland'
+      };
+
+      return timezoneMap[abbreviation] || null;
+    }
+
+    return null;
   }
 
   /**
@@ -472,8 +522,8 @@ Respond with JSON:
   }
 
   // Convert relative dates to actual ISO date strings
-  // ENHANCED: Now handles time-enhanced date strings like "monday 2:00pm-3:00pm"
-  private convertRelativeDate(dateStr: string): string | null {
+  // ENHANCED: Now handles time-enhanced date strings like "monday 2:00pm-3:00pm" AND timezone-aware conversion
+  private convertRelativeDate(dateStr: string, timezone: string): string | null {
     try {
       const now = new Date();
       const lowerDateStr = dateStr.toLowerCase();
@@ -537,9 +587,9 @@ Respond with JSON:
 
       // NEW: Apply specific time if provided
       if (timeRange) {
-        const dateWithTime = this.applyTimeToDate(baseDate, timeRange);
+        const dateWithTime = this.applyTimeToDate(baseDate, timeRange, timezone);
         if (dateWithTime) {
-          console.log(`✅ [DATE CONVERT] Final result: "${dateWithTime.toISOString()}"`);
+          console.log(`✅ [DATE CONVERT] Final result with timezone: "${dateWithTime.toISOString()}"`);
           return dateWithTime.toISOString();
         }
       }
@@ -576,14 +626,14 @@ Respond with JSON:
 
   /**
    * Apply specific time range to a base date
-   * NEW: Converts "2:00pm-3:00pm" to actual start time on the given date
+   * NEW: Converts "2:00pm-3:00pm" to actual start time on the given date, WITH timezone awareness
    */
-  private applyTimeToDate(baseDate: Date, timeRange: string): Date | null {
+  private applyTimeToDate(baseDate: Date, timeRange: string, timezone: string): Date | null {
     try {
       // Parse time range like "2:00pm-3:00pm"
       const timeRangePattern = /(\d{1,2}):(\d{2})(am|pm)-(\d{1,2}):(\d{2})(am|pm)/i;
       const match = timeRange.match(timeRangePattern);
-      
+
       if (!match) {
         console.warn(`⚠️ [TIME APPLY] Could not parse time range: "${timeRange}"`);
         return null;
@@ -600,16 +650,104 @@ Respond with JSON:
         startHour = 0;
       }
 
-      // Create new date with specific time
-      const dateWithTime = new Date(baseDate);
-      dateWithTime.setHours(startHour, startMinute, 0, 0);
+      // CRITICAL FIX: Always create date in the specified timezone
+      console.log(`🌍 [TIME APPLY] Creating date with timezone: ${timezone}`);
 
-      console.log(`🕐 [TIME APPLY] Applied time "${timeRange}" to date: ${dateWithTime.toISOString()}`);
-      return dateWithTime;
+      // Format date as YYYY-MM-DD HH:mm in the specified timezone
+      const year = baseDate.getFullYear();
+      const month = String(baseDate.getMonth() + 1).padStart(2, '0');
+      const day = String(baseDate.getDate()).padStart(2, '0');
+      const hourStr = String(startHour).padStart(2, '0');
+      const minuteStr = String(startMinute).padStart(2, '0');
+
+      // Create date string in format that can be parsed with timezone
+      const dateString = `${year}-${month}-${day}T${hourStr}:${minuteStr}:00`;
+
+      // CRITICAL FIX: Pass the actual meeting date to get correct DST offset
+      const dateInTimezone = new Date(dateString + this.getTimezoneOffset(timezone, baseDate));
+
+      console.log(`🕐 [TIME APPLY] Applied time "${timeRange}" in ${timezone}: ${dateInTimezone.toISOString()}`);
+      return dateInTimezone;
 
     } catch (error) {
       console.warn(`⚠️ [TIME APPLY] Error applying time: ${error}`);
       return null;
+    }
+  }
+
+  /**
+   * Get timezone offset string for a given IANA timezone on a specific date
+   * NEW: Helper for timezone-aware date conversion
+   * Returns format like "-05:00" for EST or "-04:00" for EDT
+   * CRITICAL: Uses the actual meeting date to handle DST correctly
+   */
+  private getTimezoneOffset(timezone: string, referenceDate: Date = new Date()): string {
+    try {
+      // CRITICAL FIX: Use the actual meeting date to determine DST status
+      // This ensures we get -04:00 for EDT in summer, -05:00 for EST in winter
+      const testDate = new Date(referenceDate);
+      testDate.setHours(12, 0, 0, 0); // Noon to avoid edge cases
+
+      // Format the date in the target timezone
+      const tzString = testDate.toLocaleString('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+
+      // Format the same date in UTC
+      const utcString = testDate.toLocaleString('en-US', {
+        timeZone: 'UTC',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+
+      // Parse both strings to get timestamps
+      const tzDate = new Date(tzString);
+      const utcDate = new Date(utcString);
+
+      // Calculate offset in minutes: UTC - LocalTime
+      const offsetMinutes = (utcDate.getTime() - tzDate.getTime()) / (1000 * 60);
+
+      // Convert to hours and minutes
+      const sign = offsetMinutes >= 0 ? '-' : '+'; // Note: reversed sign because we want UTC offset
+      const hours = Math.floor(Math.abs(offsetMinutes) / 60);
+      const minutes = Math.abs(offsetMinutes) % 60;
+
+      const offsetString = `${sign}${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+
+      console.log(`🌍 [TIMEZONE OFFSET] ${timezone} on ${referenceDate.toISOString().split('T')[0]} → ${offsetString}`);
+      return offsetString;
+
+    } catch (error) {
+      console.error(`❌ [TIMEZONE] Error calculating offset for ${timezone}:`, error);
+      // Return a reasonable default based on common timezones
+      const fallbackOffsets: { [key: string]: string } = {
+        'America/New_York': '-05:00',
+        'America/Chicago': '-06:00',
+        'America/Denver': '-07:00',
+        'America/Los_Angeles': '-08:00',
+        'Europe/London': '+00:00',
+        'Europe/Paris': '+01:00',
+        'Asia/Tokyo': '+09:00',
+        'Asia/Kolkata': '+05:30',
+        'Australia/Sydney': '+10:00',
+        'Pacific/Auckland': '+12:00'
+      };
+
+      const fallback = fallbackOffsets[timezone] || '+00:00';
+      console.warn(`⚠️ [TIMEZONE] Using fallback offset for ${timezone}: ${fallback}`);
+      return fallback;
     }
   }
 

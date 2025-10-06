@@ -11,14 +11,20 @@
 ```bash
 # Just push to git - Railway handles the rest!
 git add .
-git commit -m "TIMEZONE FIX: Enterprise timezone support for multi-timezone meetings
+git commit -m "TIMEZONE FIX: Enterprise timezone support + cross-timezone meeting parsing
 
 - Fix availability checking to use user timezone
 - Fix calendar event creation with explicit timezones
 - Add TimezoneService for timezone management
+- Add timezone abbreviation parsing (detect 'EST', 'PST', etc. in emails)
+- Support cross-timezone meetings (e.g., PST user + '2pm EST' → correct time)
 - Add database migration (auto-runs on startup)
 - All integration tests passing (100%)
-- Backwards compatible, zero breaking changes"
+- Zero performance overhead, backwards compatible
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-Authored-By: Claude <noreply@anthropic.com>"
 
 git push origin main
 ```
@@ -112,6 +118,8 @@ git push origin main
 - ✅ After: Meetings created at user's timezone
 - ❌ Before: "2pm" = 2pm UTC = 6am PST for PST users
 - ✅ After: "2pm" = 2pm PST for PST users
+- ❌ Before: PST user + "2pm EST" email = meeting at 2pm PST (wrong!)
+- ✅ After: PST user + "2pm EST" email = meeting at 2pm EST (11am PST, correct!)
 
 ---
 

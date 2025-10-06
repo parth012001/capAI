@@ -213,11 +213,22 @@ Looking forward to speaking with you!`;
       // CRITICAL: Check availability using USER'S timezone, not server's timezone!
       if (preferredDate) {
         try {
-          // Get user's timezone from calendar service (already initialized)
-          const userTimezone = this.calendarService.getUserTimezone();
-          console.log(`🌍 [TIMEZONE] User timezone for availability check: ${userTimezone}`);
+          // First, check if email text explicitly mentions a timezone (e.g., "2pm EST")
+          const detectedTimezone = TimezoneService.extractTimezoneFromText(preferredDate);
 
-          // Parse date in USER'S timezone (THE FIX!)
+          // Get user's default timezone from calendar service (already initialized)
+          const defaultUserTimezone = this.calendarService.getUserTimezone();
+
+          // Use detected timezone if found, otherwise use user's default timezone
+          const userTimezone = detectedTimezone || defaultUserTimezone;
+
+          if (detectedTimezone) {
+            console.log(`🌍 [TIMEZONE] Email mentions explicit timezone: ${detectedTimezone} (user default: ${defaultUserTimezone})`);
+          } else {
+            console.log(`🌍 [TIMEZONE] Using user's default timezone: ${userTimezone}`);
+          }
+
+          // Parse date in the appropriate timezone (THE FIX!)
           const timezoneAwareDate = TimezoneService.parseDateInUserTimezone(
             preferredDate,
             userTimezone
@@ -331,8 +342,16 @@ Looking forward to speaking with you!`;
       const duration = meetingRequest.requestedDuration || 60;
 
       // CRITICAL: Parse date in USER'S timezone for meeting acceptance
-      const userTimezone = this.calendarService.getUserTimezone();
-      console.log(`🌍 [TIMEZONE] Accepting meeting in user timezone: ${userTimezone}`);
+      // First check if email explicitly mentions timezone (e.g., "2pm EST")
+      const detectedTimezone = TimezoneService.extractTimezoneFromText(requestedTime);
+      const defaultUserTimezone = this.calendarService.getUserTimezone();
+      const userTimezone = detectedTimezone || defaultUserTimezone;
+
+      if (detectedTimezone) {
+        console.log(`🌍 [TIMEZONE] Email mentions explicit timezone for acceptance: ${detectedTimezone} (user default: ${defaultUserTimezone})`);
+      } else {
+        console.log(`🌍 [TIMEZONE] Accepting meeting in user's default timezone: ${userTimezone}`);
+      }
 
       const timezoneAwareDate = TimezoneService.parseDateInUserTimezone(
         requestedTime,
@@ -429,9 +448,18 @@ Looking forward to speaking with you!`;
       if (schedulingLink) {
         // User has scheduling link - use AI-enhanced response
         // CRITICAL: Parse date in USER'S timezone for conflict response
-        const userTimezone = this.calendarService.getUserTimezone();
+        // First check if email explicitly mentions timezone (e.g., "2pm EST")
+        const requestedTime = meetingRequest.preferredDates![0];
+        const detectedTimezone = TimezoneService.extractTimezoneFromText(requestedTime);
+        const defaultUserTimezone = this.calendarService.getUserTimezone();
+        const userTimezone = detectedTimezone || defaultUserTimezone;
+
+        if (detectedTimezone) {
+          console.log(`🌍 [TIMEZONE] Email mentions explicit timezone for conflict: ${detectedTimezone} (user default: ${defaultUserTimezone})`);
+        }
+
         const timezoneAwareDate = TimezoneService.parseDateInUserTimezone(
-          meetingRequest.preferredDates![0],
+          requestedTime,
           userTimezone
         );
 
