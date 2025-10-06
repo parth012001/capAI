@@ -59,6 +59,20 @@ export async function initializeDatabase() {
         }
       }
 
+      // Apply timezone support migration
+      console.log('🌍 Applying timezone support migration...');
+
+      const timezoneMigrationPath = path.join(__dirname, '../../scripts/database/add_timezone_support.sql');
+      if (fs.existsSync(timezoneMigrationPath)) {
+        const timezoneMigration = fs.readFileSync(timezoneMigrationPath, 'utf8');
+        try {
+          await pool.query(timezoneMigration);
+          console.log('✅ Timezone support migration applied successfully');
+        } catch (error: any) {
+          console.log('⚠️  Timezone migration warning:', error.message);
+        }
+      }
+
       return true;
     }
 

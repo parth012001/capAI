@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { OAuth2Client } from 'google-auth-library';
 import { CalendarEvent, TimeSlotSuggestion } from '../types';
+import { TimezoneService } from './timezone';
 
 export interface AvailabilityCheck {
   start: string;
@@ -12,6 +13,8 @@ export interface AvailabilityCheck {
 export class CalendarService {
   private oauth2Client: OAuth2Client;
   private calendar: any;
+  private userTimezone: string | null = null;  // Cache user timezone
+  private userId: string | null = null;  // Track which user this service is initialized for
 
   constructor() {
     this.oauth2Client = new google.auth.OAuth2(
@@ -29,6 +32,33 @@ export class CalendarService {
       access_token: accessToken,
       refresh_token: refreshToken,
     });
+  }
+
+  /**
+   * Initialize calendar service for a specific user and fetch their timezone
+   * This should be called after setting tokens
+   */
+  async initializeForUser(userId: string): Promise<void> {
+    try {
+      console.log(`🌍 [CALENDAR] Initializing calendar service for user: ${userId}`);
+      this.userId = userId;
+
+      // Fetch and cache user timezone
+      this.userTimezone = await TimezoneService.getUserTimezone(userId, this.oauth2Client);
+      console.log(`✅ [CALENDAR] User timezone loaded: ${this.userTimezone}`);
+
+    } catch (error) {
+      console.error(`❌ [CALENDAR] Error initializing calendar service:`, error);
+      // Use fallback timezone
+      this.userTimezone = 'America/Los_Angeles';
+    }
+  }
+
+  /**
+   * Get the current user's timezone
+   */
+  getUserTimezone(): string {
+    return this.userTimezone || 'America/Los_Angeles';
   }
 
   // Just-in-time availability checking
@@ -165,18 +195,33 @@ export class CalendarService {
     }
   }
 
-  // Create calendar event
+  // Create calendar event (UPDATED: Now timezone-aware!)
   async createCalendarEvent(event: CalendarEvent, calendarId: string = 'primary'): Promise<CalendarEvent> {
     try {
       console.log(`📅 Creating calendar event: ${event.summary}`);
+
+      // Ensure event has explicit timezone (CRITICAL FIX!)
+      const userTz = this.getUserTimezone();
+
+      const startWithTz = event.start?.timeZone
+        ? event.start
+        : { ...event.start, timeZone: userTz };
+
+      const endWithTz = event.end?.timeZone
+        ? event.end
+        : { ...event.end, timeZone: userTz };
+
+      console.log(`🌍 [CALENDAR] Creating event in timezone: ${userTz}`);
+      console.log(`📅 [CALENDAR] Start: ${startWithTz.dateTime} (${startWithTz.timeZone})`);
+      console.log(`📅 [CALENDAR] End: ${endWithTz.dateTime} (${endWithTz.timeZone})`);
 
       const response = await this.calendar.events.insert({
         calendarId: calendarId,
         requestBody: {
           summary: event.summary,
           description: event.description,
-          start: event.start,
-          end: event.end,
+          start: startWithTz,
+          end: endWithTz,
           attendees: event.attendees,
           location: event.location,
         },
@@ -184,13 +229,46 @@ export class CalendarService {
 
       const createdEvent = this.parseCalendarEvent(response.data);
       console.log(`✅ Calendar event created: ${createdEvent.id}`);
-      
+
       return createdEvent;
 
     } catch (error) {
       console.error('❌ Error creating calendar event:', error);
       throw error;
     }
+  }
+
+  /**
+   * NEW: Create calendar event with explicit date objects and timezone
+   * This is a helper method that handles timezone conversion automatically
+   */
+  async createCalendarEventWithDates(
+    summary: string,
+    startDate: Date,
+    endDate: Date,
+    description?: string,
+    location?: string,
+    attendees?: Array<{ email: string }>,
+    calendarId: string = 'primary'
+  ): Promise<CalendarEvent> {
+    const userTz = this.getUserTimezone();
+
+    // Use TimezoneService to create properly formatted event times
+    const start = TimezoneService.createCalendarEventTime(startDate, userTz);
+    const end = TimezoneService.createCalendarEventTime(endDate, userTz);
+
+    console.log(`🌍 [CALENDAR] Creating event with dates in timezone: ${userTz}`);
+    console.log(`📅 [CALENDAR] Start: ${start.dateTime} (${start.timeZone})`);
+    console.log(`📅 [CALENDAR] End: ${end.dateTime} (${end.timeZone})`);
+
+    return this.createCalendarEvent({
+      summary,
+      description,
+      start,
+      end,
+      location,
+      attendees
+    }, calendarId);
   }
 
   // Helper method to parse Google Calendar event

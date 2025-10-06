@@ -1335,6 +1335,9 @@ app.post('/auto-drafts/:id/send', authMiddleware.authenticate, async (req, res) 
 
             await calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
 
+            // CRITICAL: Initialize calendar service with user timezone
+            await calendarService.initializeForUser(userId);
+
             // Create calendar event with proper structure
             const startTime = new Date(proposedTime);
             const durationMinutes = Math.min(context.meetingRequest.duration || 60, 120); // Cap at 2 hours max

@@ -8,6 +8,7 @@ import { safeParseDate, safeParseDateWithValidation } from '../utils/dateParser'
 import { UserProfileService } from './userProfile';
 import { MeetingAIContentService, AIContentRequest } from './meetingAIContent';
 import { AIService } from './ai';
+import { TimezoneService } from './timezone';
 
 export interface MeetingTimeSlot {
   start: string;
@@ -209,26 +210,40 @@ Looking forward to speaking with you!`;
       const duration = meetingRequest.requestedDuration || 60;
       const preferredDate = meetingRequest.preferredDates?.[0];
 
-      // First check if the preferred time is available (with robust date parsing)
+      // CRITICAL: Check availability using USER'S timezone, not server's timezone!
       if (preferredDate) {
-        const dateParseResult = safeParseDateWithValidation(preferredDate);
-        if (dateParseResult.isValid && dateParseResult.date) {
-          console.log(`📅 Parsed preferred date: ${preferredDate} → ${dateParseResult.date.toISOString()} (confidence: ${dateParseResult.confidence}%)`);
-          const endTime = new Date(dateParseResult.date.getTime() + (duration * 60 * 1000));
-          try {
+        try {
+          // Get user's timezone from calendar service (already initialized)
+          const userTimezone = this.calendarService.getUserTimezone();
+          console.log(`🌍 [TIMEZONE] User timezone for availability check: ${userTimezone}`);
+
+          // Parse date in USER'S timezone (THE FIX!)
+          const timezoneAwareDate = TimezoneService.parseDateInUserTimezone(
+            preferredDate,
+            userTimezone
+          );
+
+          if (!timezoneAwareDate || !timezoneAwareDate.utcDate) {
+            console.warn(`⚠️ [TIMEZONE] Could not parse date "${preferredDate}" in timezone ${userTimezone}`);
+            isAvailable = false;
+          } else {
+            console.log(`📅 [TIMEZONE] Parsed "${preferredDate}" in ${userTimezone}:`);
+            console.log(`   → UTC: ${timezoneAwareDate.utcDate.toISOString()}`);
+            console.log(`   → Local: ${timezoneAwareDate.formatted}`);
+
+            const endTime = new Date(timezoneAwareDate.utcDate.getTime() + (duration * 60 * 1000));
+
+            // Check availability with timezone-aware dates
             const availability = await this.calendarService.checkAvailability(
-              dateParseResult.date.toISOString(),
+              timezoneAwareDate.utcDate.toISOString(),
               endTime.toISOString()
             );
             isAvailable = availability.isAvailable;
-            console.log(`📅 Availability check: ${isAvailable ? '✅ Available' : '❌ Conflict found'} for ${preferredDate}`);
-          } catch (availabilityError) {
-            console.error('❌ Error checking availability:', availabilityError);
-            isAvailable = false; // Treat availability check errors as unavailable
+            console.log(`📅 Availability check: ${isAvailable ? '✅ Available' : '❌ Conflict found'} for ${preferredDate} (${userTimezone})`);
           }
-        } else {
-          console.warn(`⚠️ [DATE PARSING] Could not parse preferred date: "${preferredDate}" - ${dateParseResult.errorMessage}`);
-          isAvailable = false; // Treat unparseable dates as unavailable
+        } catch (availabilityError) {
+          console.error('❌ Error checking availability:', availabilityError);
+          isAvailable = false; // Treat availability check errors as unavailable
         }
       }
 
@@ -314,18 +329,27 @@ Looking forward to speaking with you!`;
     try {
       const requestedTime = meetingRequest.preferredDates![0];
       const duration = meetingRequest.requestedDuration || 60;
-      
-      // Robust date parsing for meeting acceptance
-      const dateParseResult = safeParseDateWithValidation(requestedTime);
-      if (!dateParseResult.isValid || !dateParseResult.date) {
-        throw new Error(`Cannot accept meeting - invalid date: "${requestedTime}" - ${dateParseResult.errorMessage}`);
+
+      // CRITICAL: Parse date in USER'S timezone for meeting acceptance
+      const userTimezone = this.calendarService.getUserTimezone();
+      console.log(`🌍 [TIMEZONE] Accepting meeting in user timezone: ${userTimezone}`);
+
+      const timezoneAwareDate = TimezoneService.parseDateInUserTimezone(
+        requestedTime,
+        userTimezone
+      );
+
+      if (!timezoneAwareDate || !timezoneAwareDate.utcDate) {
+        throw new Error(`Cannot accept meeting - could not parse date "${requestedTime}" in timezone ${userTimezone}`);
       }
-      
-      const requestedDate = dateParseResult.date;
+
+      console.log(`📅 [TIMEZONE] Accepting meeting for: ${timezoneAwareDate.formatted}`);
+
+      const requestedDate = timezoneAwareDate.utcDate;
       const endTime = new Date(requestedDate.getTime() + (duration * 60 * 1000));
 
-      // Format time for response
-      const timeFormatted = this.formatDateTime(requestedDate);
+      // Format time for response (uses user's timezone)
+      const timeFormatted = timezoneAwareDate.formatted;
       
       // Generate personalized response text (no calendar booking yet - user approval required)
       let responseText = await this.generateAcceptanceText(meetingRequest, context, timeFormatted, false, email);
@@ -404,14 +428,20 @@ Looking forward to speaking with you!`;
 
       if (schedulingLink) {
         // User has scheduling link - use AI-enhanced response
-        const dateParseResult = safeParseDateWithValidation(meetingRequest.preferredDates![0]);
-        if (!dateParseResult.isValid || !dateParseResult.date) {
-          console.error(`❌ Cannot format time for conflict response - invalid date: "${meetingRequest.preferredDates![0]}" - ${dateParseResult.errorMessage}`);
+        // CRITICAL: Parse date in USER'S timezone for conflict response
+        const userTimezone = this.calendarService.getUserTimezone();
+        const timezoneAwareDate = TimezoneService.parseDateInUserTimezone(
+          meetingRequest.preferredDates![0],
+          userTimezone
+        );
+
+        if (!timezoneAwareDate || !timezoneAwareDate.utcDate) {
+          console.error(`❌ Cannot format time for conflict response - could not parse date in timezone ${userTimezone}`);
           // Fallback to more info request if we can't parse the date
           return await this.generateMoreInfoResponse(email, meetingRequest, context);
         }
 
-        const timeFormatted = this.formatDateTime(dateParseResult.date);
+        const timeFormatted = timezoneAwareDate.formatted;
 
         // Generate AI-enhanced conflict response with scheduling link
         const responseText = await this.generateConflictResponseText(
@@ -1119,28 +1149,29 @@ ${closing}`;
 
   /**
    * Initialize Gmail and Calendar services for user
+   * UPDATED: Now includes timezone initialization
    */
   private async initializeServicesForUser(userId: string): Promise<void> {
     try {
       // Initialize Gmail service first
       await this.gmailService.initializeForUser(userId);
-      
+
       // Get user credentials for calendar service with proper validation
       const credentials = await this.gmailService.tokenStorageService.getDecryptedCredentials(userId);
-      
+
       if (!credentials) {
         throw new Error(`No OAuth credentials found for user ${userId}. User needs to authenticate first.`);
       }
-      
+
       if (!credentials.accessToken) {
         throw new Error(`No access token found for user ${userId}. User needs to re-authenticate.`);
       }
-      
+
       // Check if tokens appear to be expired (basic validation)
       if (credentials.accessToken && this.isTokenLikelyExpired(credentials)) {
         console.log(`⚠️ OAuth tokens may be expired for user ${userId}, attempting refresh...`);
-        
-        try {
+
+        try{
           // Attempt to refresh tokens using the calendar service
           await this.calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
           
@@ -1153,7 +1184,7 @@ ${closing}`;
       } else {
         // Tokens appear valid, set them up
         await this.calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
-        
+
         // Test the connection to make sure everything works
         try {
           await this.testCalendarConnection();
@@ -1161,7 +1192,12 @@ ${closing}`;
           throw new Error(`OAuth tokens invalid for user ${userId}. Calendar connection failed. User needs to re-authenticate. Error: ${connectionError instanceof Error ? connectionError.message : 'Connection test failed'}`);
         }
       }
-      
+
+      // CRITICAL: Initialize calendar service with user timezone
+      // This ensures all date parsing and event creation uses the correct timezone
+      console.log(`🌍 [TIMEZONE] Initializing calendar service with user timezone...`);
+      await this.calendarService.initializeForUser(userId);
+
       console.log(`✅ OAuth services initialized successfully for user ${userId}`);
       
     } catch (error) {

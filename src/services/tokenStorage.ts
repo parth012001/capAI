@@ -17,6 +17,8 @@ export interface UserTokenData {
   lastName?: string;
   fullName?: string;
   onboardingCompleted?: boolean;
+  timezone?: string;  // NEW: User's IANA timezone
+  timezoneUpdatedAt?: Date;  // NEW: When timezone was last updated
   createdAt: Date;
   updatedAt: Date;
 }
@@ -139,8 +141,9 @@ export class TokenStorageService {
         SELECT user_id, gmail_address, refresh_token_encrypted,
                access_token_encrypted, access_token_expires_at,
                webhook_active, webhook_expires_at, first_name, last_name,
-               full_name, onboarding_completed, created_at, updated_at
-        FROM user_gmail_tokens 
+               full_name, onboarding_completed, timezone, timezone_updated_at,
+               created_at, updated_at
+        FROM user_gmail_tokens
         WHERE user_id = $1 AND webhook_active = true
       `;
 
