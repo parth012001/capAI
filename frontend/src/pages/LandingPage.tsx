@@ -482,13 +482,6 @@ export default function LandingPage() {
             >
               Terms
             </motion.a>
-            <motion.a
-              href="#"
-              className="hover:text-white transition-colors"
-              whileHover={{ scale: 1.1, color: '#ffffff' }}
-            >
-              Contact
-            </motion.a>
           </div>
         </div>
       </footer>
