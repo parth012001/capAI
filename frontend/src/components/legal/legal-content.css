@@ -1,0 +1,169 @@
+/* Legal Content Styling - Shared for Privacy Policy and Terms of Use */
+
+/* Base styles - remove backgrounds from legal template HTML */
+.legal-content [data-custom-class='body'],
+.legal-content [data-custom-class='body'] * {
+  background: transparent !important;
+}
+
+/* Title styling */
+.legal-content [data-custom-class='title'],
+.legal-content [data-custom-class='title'] * {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  font-size: 2rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Subtitle styling */
+.legal-content [data-custom-class='subtitle'],
+.legal-content [data-custom-class='subtitle'] * {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  color: #64748b !important;
+  font-size: 0.875rem !important;
+  margin-bottom: 1.5rem !important;
+}
+
+/* Heading 1 */
+.legal-content [data-custom-class='heading_1'],
+.legal-content [data-custom-class='heading_1'] * {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  margin-top: 2rem !important;
+  margin-bottom: 1rem !important;
+}
+
+/* Heading 2 */
+.legal-content [data-custom-class='heading_2'],
+.legal-content [data-custom-class='heading_2'] * {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin-top: 1.5rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+/* Body text */
+.legal-content [data-custom-class='body_text'],
+.legal-content [data-custom-class='body_text'] * {
+  color: #475569 !important;
+  font-size: 1rem !important;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  line-height: 1.75 !important;
+}
+
+/* Links */
+.legal-content [data-custom-class='link'],
+.legal-content [data-custom-class='link'] * {
+  color: #2563eb !important;
+  font-size: 1rem !important;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif !important;
+  word-break: break-word !important;
+  text-decoration: underline !important;
+}
+
+.legal-content [data-custom-class='link']:hover {
+  color: #1d4ed8 !important;
+}
+
+/* Standard HTML headings */
+.legal-content h1 {
+  font-size: 2rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  margin-top: 2rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.legal-content h2 {
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+  color: #0f172a !important;
+  margin-top: 2rem !important;
+  margin-bottom: 1rem !important;
+}
+
+.legal-content h3 {
+  font-size: 1.25rem !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin-top: 1.5rem !important;
+  margin-bottom: 0.75rem !important;
+}
+
+/* Lists */
+.legal-content ul {
+  list-style-type: disc !important;
+  padding-left: 2rem !important;
+  margin: 1rem 0 !important;
+}
+
+.legal-content ul > li {
+  margin: 0.5rem 0 !important;
+  color: #475569 !important;
+}
+
+.legal-content ol {
+  list-style-type: decimal !important;
+  padding-left: 2rem !important;
+  margin: 1rem 0 !important;
+}
+
+/* Tables */
+.legal-content table {
+  width: 100% !important;
+  border-collapse: collapse !important;
+  margin: 1.5rem 0 !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+.legal-content th,
+.legal-content td {
+  padding: 0.75rem !important;
+  border: 1px solid #e2e8f0 !important;
+  text-align: left !important;
+  font-size: 0.875rem !important;
+}
+
+.legal-content th {
+  background-color: #f8fafc !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+}
+
+/* Paragraphs and text formatting */
+.legal-content p {
+  margin: 1rem 0 !important;
+  line-height: 1.75 !important;
+}
+
+.legal-content strong {
+  font-weight: 600 !important;
+  color: #1e293b !important;
+}
+
+.legal-content em {
+  font-style: italic !important;
+}
+
+.legal-content a {
+  color: #2563eb !important;
+  text-decoration: underline !important;
+}
+
+.legal-content a:hover {
+  color: #1d4ed8 !important;
+}
+
+.legal-content div {
+  margin: 0.5rem 0;
+}
+
+/* Hide any template tags that might remain */
+.legal-content bdt {
+  display: none !important;
+}

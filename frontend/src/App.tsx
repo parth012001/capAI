@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import LandingPage from './pages/LandingPage';
 import SignUpSignInPage from './pages/SignUpSignInPage';
 import SignUpPage from './pages/SignUpPage';
 import SignInPage from './pages/SignInPage';
@@ -8,6 +9,8 @@ import AuthCallbackPage from './pages/AuthCallbackPage';
 import ProfileSetupPage from './pages/ProfileSetupPage';
 import DashboardPage from './pages/DashboardPage';
 import SystemStatusPage from './pages/SystemStatusPage';
+import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
+import TermsOfUsePage from './pages/TermsOfUsePage';
 import NotFoundPage from './pages/NotFoundPage';
 import LoadingSpinner from './components/LoadingSpinner';
 import Onboarding from './components/Onboarding';
@@ -46,19 +49,29 @@ function AppContent() {
 		<Router>
 			<div className="App">
 				<Routes>
-					{/* Root route - redirect based on auth status */}
-					<Route 
-						path="/" 
-						element={<Navigate to="/signup-signin" replace />} 
+					{/* Landing page - NEW route */}
+					<Route
+						path="/"
+						element={<LandingPage />}
+					/>
+					{/* Privacy Policy - Public route */}
+					<Route
+						path="/privacy"
+						element={<PrivacyPolicyPage />}
+					/>
+					{/* Terms of Use - Public route */}
+					<Route
+						path="/terms"
+						element={<TermsOfUsePage />}
 					/>
 					{/* Public routes */}
-					<Route 
-						path="/signup-signin" 
+					<Route
+						path="/signup-signin"
 						element={
 							<PublicRoute>
 								<SignUpSignInPage />
 							</PublicRoute>
-						} 
+						}
 					/>
 					<Route 
 						path="/signup" 
