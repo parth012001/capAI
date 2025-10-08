@@ -1,3 +1,4 @@
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Button } from '../components/ui/Button';
@@ -6,13 +7,37 @@ import { Card } from '../components/ui/Card';
 export default function LandingPage() {
   const navigate = useNavigate();
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const [isScrolled, setIsScrolled] = React.useState(false);
 
-  const handleGetStarted = () => {
-    window.location.href = `${apiUrl}/auth?mode=signup`;
+  React.useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 20);
+    };
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const handleGetStarted = async () => {
+    try {
+      const response = await fetch(`${apiUrl}/auth?mode=signup`);
+      const data = await response.json();
+      if (data.authUrl) {
+        window.location.href = data.authUrl;
+      }
+    } catch (error) {
+      console.error('Error initiating authentication:', error);
+    }
   };
 
   const handleSignIn = () => {
     navigate('/signin');
+  };
+
+  const scrollToSection = (sectionId: string) => {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   };
 
   // Animation variants
@@ -37,7 +62,11 @@ export default function LandingPage() {
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.6 }}
-        className="absolute top-0 left-0 right-0 z-50 px-6 py-4"
+        className={`fixed top-0 left-0 right-0 z-50 px-6 py-4 transition-all duration-300 ${
+          isScrolled
+            ? 'bg-white/80 backdrop-blur-lg shadow-lg border-b border-slate-200/50'
+            : 'bg-transparent'
+        }`}
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <motion.div
@@ -50,8 +79,44 @@ export default function LandingPage() {
               Captain AI
             </span>
           </motion.div>
-          <Button variant="ghost" size="default" onClick={handleSignIn}>
-            Sign In
+
+          {/* Navigation Links */}
+          <nav className="hidden md:flex items-center space-x-8">
+            <button
+              onClick={() => scrollToSection('features')}
+              className="text-slate-700 hover:text-blue-600 font-medium transition-colors duration-200"
+            >
+              Features
+            </button>
+            <button
+              onClick={() => scrollToSection('how-it-works')}
+              className="text-slate-700 hover:text-blue-600 font-medium transition-colors duration-200"
+            >
+              How It Works
+            </button>
+            <button
+              onClick={() => scrollToSection('security')}
+              className="text-slate-700 hover:text-blue-600 font-medium transition-colors duration-200"
+            >
+              Security
+            </button>
+          </nav>
+
+          <Button
+            variant="outline"
+            size="default"
+            onClick={handleSignIn}
+            className="border-2 border-blue-600/20 hover:border-blue-600 hover:bg-blue-50 text-blue-600 font-semibold transition-all duration-200 px-6 py-2 flex items-center gap-2 group"
+          >
+            <span>Sign In</span>
+            <svg
+              className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-200"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
           </Button>
         </div>
       </motion.header>
@@ -109,17 +174,17 @@ export default function LandingPage() {
             <span className="text-slate-600">Schedule meetings, draft replies, and handle your inbox—all without lifting a finger.</span>
           </motion.p>
 
-          {/* CTA Buttons */}
+          {/* CTA Button */}
           <motion.div
             variants={fadeInUp}
-            className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14"
+            className="flex flex-col items-center justify-center mb-14"
           >
             <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
               <Button
                 variant="primary"
                 size="lg"
                 onClick={handleGetStarted}
-                className="text-lg px-10 py-7 h-auto shadow-2xl hover:shadow-[0_20px_50px_rgba(59,130,246,0.5)] flex items-center gap-3 group bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all duration-300"
+                className="text-lg px-12 py-6 h-auto shadow-2xl hover:shadow-[0_20px_50px_rgba(59,130,246,0.5)] flex items-center gap-3 group bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 transition-all duration-300 rounded-xl"
               >
                 <svg className="w-6 h-6" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -127,19 +192,14 @@ export default function LandingPage() {
                   <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                   <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                 </svg>
-                <span className="group-hover:translate-x-1 transition-transform">Continue with Google</span>
+                <span className="group-hover:translate-x-1 transition-transform">Get Started with Google</span>
               </Button>
             </motion.div>
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button
-                variant="outline"
-                size="lg"
-                onClick={handleSignIn}
-                className="text-lg px-10 py-7 h-auto border-2 border-slate-300 hover:border-blue-500 hover:bg-blue-50 transition-all duration-300"
-              >
-                Sign In
-              </Button>
-            </motion.div>
+            <p className="text-sm text-slate-600 mt-4 flex items-center gap-2">
+              <span>Free to start</span>
+              <span>•</span>
+              <span>No credit card required</span>
+            </p>
           </motion.div>
 
           {/* Trust Signals */}
@@ -196,7 +256,7 @@ export default function LandingPage() {
       </section>
 
       {/* How It Works Section */}
-      <section className="py-24 px-6 bg-gradient-to-b from-white/80 to-blue-50/50 backdrop-blur-sm">
+      <section id="how-it-works" className="py-24 px-6 bg-gradient-to-b from-white/80 to-blue-50/50 backdrop-blur-sm scroll-mt-20">
         <div className="max-w-6xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -249,7 +309,7 @@ export default function LandingPage() {
       </section>
 
       {/* Key Features Section */}
-      <section className="py-24 px-6 bg-gradient-to-b from-blue-50/50 to-purple-50/50">
+      <section id="features" className="py-24 px-6 bg-gradient-to-b from-blue-50/50 to-purple-50/50 scroll-mt-20">
         <div className="max-w-6xl mx-auto">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -340,7 +400,7 @@ export default function LandingPage() {
       </section>
 
       {/* Security Trust Section */}
-      <section className="py-20 px-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden">
+      <section id="security" className="py-20 px-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden scroll-mt-20">
         {/* Animated background */}
         <motion.div
           className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-l from-blue-600/20 to-purple-600/20 rounded-full filter blur-3xl"
@@ -447,7 +507,7 @@ export default function LandingPage() {
                   <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
                   <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                 </svg>
-                <span className="group-hover:translate-x-2 transition-transform">Get Started Free</span>
+                <span className="group-hover:translate-x-2 transition-transform">Get Started with Google</span>
               </Button>
             </motion.div>
             <p className="text-base text-blue-100 mt-8 flex items-center justify-center gap-6 flex-wrap font-medium">
