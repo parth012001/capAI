@@ -56,7 +56,7 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 scroll-smooth">
       {/* Header */}
       <motion.header
         initial={{ y: -20, opacity: 0 }}
@@ -256,8 +256,14 @@ export default function LandingPage() {
       </section>
 
       {/* How It Works Section */}
-      <section id="how-it-works" className="py-24 px-6 bg-gradient-to-b from-white/80 to-blue-50/50 backdrop-blur-sm scroll-mt-20">
-        <div className="max-w-6xl mx-auto">
+      <section id="how-it-works" className="min-h-screen flex items-center justify-center py-24 px-6 bg-white relative scroll-mt-20">
+        {/* Top Wave Divider */}
+        <div className="absolute top-0 left-0 right-0 overflow-hidden leading-none">
+          <svg className="relative block w-full h-20" viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <path d="M321.39,56.44c58-10.79,114.16-30.13,172-41.86,82.39-16.72,168.19-17.73,250.45-.39C823.78,31,906.67,72,985.66,92.83c70.05,18.48,146.53,26.09,214.34,3V0H0V27.35A600.21,600.21,0,0,0,321.39,56.44Z" fill="rgb(239 246 255)"></path>
+          </svg>
+        </div>
+        <div className="max-w-6xl mx-auto relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -309,8 +315,17 @@ export default function LandingPage() {
       </section>
 
       {/* Key Features Section */}
-      <section id="features" className="py-24 px-6 bg-gradient-to-b from-blue-50/50 to-purple-50/50 scroll-mt-20">
-        <div className="max-w-6xl mx-auto">
+      <section id="features" className="min-h-screen flex items-center justify-center py-24 px-6 bg-gradient-to-br from-blue-50 via-purple-50/30 to-white relative scroll-mt-20">
+        {/* Decorative gradient orbs */}
+        <motion.div
+          className="absolute top-20 right-10 w-72 h-72 bg-gradient-to-r from-blue-300/30 to-purple-300/30 rounded-full filter blur-3xl"
+          animate={{
+            scale: [1, 1.2, 1],
+            opacity: [0.3, 0.5, 0.3]
+          }}
+          transition={{ duration: 8, repeat: Infinity }}
+        />
+        <div className="max-w-6xl mx-auto relative z-10">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -400,7 +415,7 @@ export default function LandingPage() {
       </section>
 
       {/* Security Trust Section */}
-      <section id="security" className="py-20 px-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden scroll-mt-20">
+      <section id="security" className="min-h-screen flex items-center justify-center py-24 px-6 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 relative overflow-hidden scroll-mt-20">
         {/* Animated background */}
         <motion.div
           className="absolute top-0 right-0 w-96 h-96 bg-gradient-to-l from-blue-600/20 to-purple-600/20 rounded-full filter blur-3xl"
@@ -412,7 +427,7 @@ export default function LandingPage() {
           transition={{ duration: 10, repeat: Infinity }}
         />
 
-        <div className="max-w-6xl mx-auto relative z-10">
+        <div className="max-w-6xl mx-auto relative z-10 w-full">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -464,7 +479,7 @@ export default function LandingPage() {
       </section>
 
       {/* Final CTA Section */}
-      <section className="py-24 px-6 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 relative overflow-hidden">
+      <section className="min-h-screen flex items-center justify-center py-24 px-6 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 relative overflow-hidden">
         {/* Animated background elements */}
         <motion.div
           className="absolute top-0 left-0 w-full h-full opacity-30"
