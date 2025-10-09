@@ -20,7 +20,6 @@ import type { AnimationCycle } from '../config/animations';
 
 export default function LandingPage() {
   const navigate = useNavigate();
-  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const [isScrolled, setIsScrolled] = React.useState(false);
   const [animationCycle, setAnimationCycle] = React.useState<AnimationCycle>('meeting');
 
@@ -40,16 +39,8 @@ export default function LandingPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleGetStarted = async () => {
-    try {
-      const response = await fetch(`${apiUrl}/auth?mode=signup`);
-      const data = await response.json();
-      if (data.authUrl) {
-        window.location.href = data.authUrl;
-      }
-    } catch (error) {
-      console.error('Error initiating authentication:', error);
-    }
+  const handleGetStarted = () => {
+    navigate('/signup');
   };
 
   const handleSignIn = () => {
