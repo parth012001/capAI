@@ -11,12 +11,18 @@ export const Card = React.forwardRef<HTMLDivElement, CardProps>(
       <div
         ref={ref}
         className={cn(
-          "rounded-xl border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md",
+          "relative rounded-2xl border border-blue-200/50 bg-white/90 backdrop-blur-xl shadow-2xl transition-all duration-300 hover:shadow-[0_20px_50px_rgba(59,130,246,0.15)] group",
           className
         )}
         {...props}
       >
-        {children}
+        {/* Gradient border effect on hover */}
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-400/10 via-purple-400/10 to-pink-400/10 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
+
+        {/* Content wrapper with relative positioning */}
+        <div className="relative">
+          {children}
+        </div>
       </div>
     );
   }

@@ -95,7 +95,7 @@ export function PromotionalEmailsPanel() {
   const emails = data?.emails || [];
 
   return (
-    <Card className="h-full flex flex-col">
+    <Card className="h-full flex flex-col overflow-hidden">
       <CardHeader className="flex-shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">

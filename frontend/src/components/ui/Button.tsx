@@ -3,21 +3,21 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "inline-flex items-center justify-center rounded-xl text-sm font-medium transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 hover:scale-105 active:scale-95",
   {
     variants: {
       variant: {
-        primary: "bg-blue-600 text-white hover:bg-blue-700 shadow-sm",
-        secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200 border border-slate-200",
-        destructive: "bg-red-600 text-white hover:bg-red-700 shadow-sm",
-        success: "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm",
+        primary: "bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 shadow-xl hover:shadow-[0_20px_50px_rgba(59,130,246,0.5)]",
+        secondary: "bg-slate-100 text-slate-900 hover:bg-slate-200 border border-slate-200 shadow-md hover:shadow-lg",
+        destructive: "bg-gradient-to-r from-red-600 to-red-700 text-white hover:from-red-700 hover:to-red-800 shadow-xl hover:shadow-[0_20px_50px_rgba(239,68,68,0.5)]",
+        success: "bg-gradient-to-r from-emerald-600 to-emerald-700 text-white hover:from-emerald-700 hover:to-emerald-800 shadow-xl hover:shadow-[0_20px_50px_rgba(16,185,129,0.5)]",
         ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
-        outline: "border border-slate-200 bg-transparent text-slate-900 hover:bg-slate-50"
+        outline: "border-2 border-slate-300 bg-transparent text-slate-900 hover:bg-slate-50 hover:border-slate-400 shadow-sm hover:shadow-md"
       },
       size: {
         sm: "h-8 px-3 py-1.5 text-xs",
         default: "h-10 px-4 py-2",
-        lg: "h-11 px-6 py-2.5",
+        lg: "h-11 px-6 py-2.5 text-base",
         icon: "h-9 w-9"
       }
     },

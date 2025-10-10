@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import { Card, CardHeader, CardContent, Badge, Spinner, Button, Modal } from '../ui';
 import { formatDate, truncateText } from '../../lib/utils';
 import { useLatestDraft, useSendDraft, useDeleteDraft, useUpdateDraft, useDeclineDraft } from '../../hooks/useDrafts';
@@ -306,13 +307,24 @@ export function DraftPanel() {
 
   return (
     <>
-    <Card className="h-full">
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5, delay: 0.1 }}
+      className="h-full"
+    >
+    <Card className="h-full flex flex-col">
       <CardHeader className="flex flex-row items-center justify-between">
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-3">
+          {/* Gradient Icon Background */}
           {isMeetingResponse ? (
-            <Calendar className="h-5 w-5 text-blue-600" />
+            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl flex items-center justify-center shadow-lg">
+              <Calendar className="h-5 w-5 text-white" />
+            </div>
           ) : (
-            <FileText className="h-5 w-5 text-emerald-600" />
+            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-green-600 rounded-xl flex items-center justify-center shadow-lg">
+              <FileText className="h-5 w-5 text-white" />
+            </div>
           )}
           <h2 className="text-xl font-semibold text-slate-900">
             {isMeetingResponse ? 'Meeting Response' : 'AI Draft'}
@@ -360,14 +372,21 @@ export function DraftPanel() {
           )}
         </div>
       </CardHeader>
-      
-      <CardContent className="space-y-4">
+
+      <CardContent className="space-y-4 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 24rem)' }}>
         {/* Meeting Context Info */}
         {isMeetingResponse && meetingRequest && (
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
-            <div className="flex items-center space-x-2 text-blue-800">
-              <Calendar className="h-4 w-4" />
-              <h3 className="font-semibold text-sm">Meeting Details</h3>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            className="bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 border border-blue-200/50 rounded-xl p-4 space-y-3 shadow-md"
+          >
+            <div className="flex items-center space-x-2">
+              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-500 rounded-lg flex items-center justify-center">
+                <Calendar className="h-4 w-4 text-white" />
+              </div>
+              <h3 className="font-semibold text-sm text-slate-900">Meeting Details</h3>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -402,7 +421,7 @@ export function DraftPanel() {
                 </div>
               )}
             </div>
-          </div>
+          </motion.div>
         )}
 
         {/* Draft Metadata */}
@@ -431,7 +450,12 @@ export function DraftPanel() {
         </div>
 
         {/* Draft Content */}
-        <div className="bg-slate-50 rounded-lg p-4">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3 }}
+          className="bg-gradient-to-br from-slate-50 to-emerald-50/30 rounded-xl p-4 border border-emerald-100/50 shadow-sm"
+        >
           <div className="space-y-3">
             <div>
               <label className="text-xs font-medium text-slate-600 uppercase tracking-wide">
@@ -483,16 +507,16 @@ export function DraftPanel() {
                   {latestDraft.body && latestDraft.body.length > 300 && (
                     <button
                       onClick={() => setIsExpanded(!isExpanded)}
-                      className="text-blue-600 text-xs mt-2 hover:underline"
+                      className="text-emerald-600 text-xs mt-2 hover:text-green-700 font-medium transition-colors duration-200"
                     >
-                      {isExpanded ? 'Show less' : 'Show more'}
+                      {isExpanded ? 'Show less ↑' : 'Show more ↓'}
                     </button>
                   )}
                 </div>
               )}
             </div>
           </div>
-        </div>
+        </motion.div>
 
         {/* Action Buttons */}
         <div className="flex items-center justify-between pt-4 border-t border-slate-100">
@@ -722,6 +746,7 @@ export function DraftPanel() {
         )}
       </CardContent>
     </Card>
+    </motion.div>
 
       {/* Decline Modal */}
       <Modal
