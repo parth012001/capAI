@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS promotional_emails (
   user_id VARCHAR(255) NOT NULL,
   thread_id VARCHAR(255),
   subject TEXT,
-  from_email VARCHAR(255) NOT NULL,
-  to_email VARCHAR(255),
+  from_email TEXT NOT NULL,
+  to_email TEXT,
   body TEXT,
   received_at TIMESTAMP DEFAULT NOW(),
   classification_reason VARCHAR(100) NOT NULL, -- 'newsletter', 'marketing', 'promotional'
@@ -17,10 +17,10 @@ CREATE TABLE IF NOT EXISTS promotional_emails (
   webhook_processed BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  
+
   -- Constraints
   UNIQUE(gmail_id, user_id)
-  
+
   -- Note: No foreign key constraint since users table doesn't exist
   -- User validation is handled at the application level
 );
