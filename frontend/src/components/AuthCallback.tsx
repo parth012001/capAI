@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import './AuthCallback.css';
 
 export default function AuthCallback() {
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
