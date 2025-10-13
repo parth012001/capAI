@@ -1482,7 +1482,21 @@ app.post('/auto-drafts/:id/send', authMiddleware.authenticate, async (req, res) 
             await calendarService.initializeForUser(userId);
 
             // Create calendar event with proper structure
+            // Minimal validation - just check time exists and is parseable
+            console.log(`📅 [VALIDATION] Checking proposed time: "${proposedTime}"`);
+
+            if (!proposedTime || proposedTime === 'null' || proposedTime === 'undefined') {
+              throw new Error('No meeting time found in email. Please specify a time.');
+            }
+
             const startTime = new Date(proposedTime);
+
+            // Only check if date is valid (not blocking any specific hours - people meet at all times)
+            if (isNaN(startTime.getTime())) {
+              throw new Error(`Could not parse meeting time: "${proposedTime}". Please check the time format.`);
+            }
+
+            console.log(`✅ [VALIDATION] Meeting time is valid: ${startTime.toISOString()}`);
             const durationMinutes = Math.min(context.meetingRequest.duration || 60, 120); // Cap at 2 hours max
             console.log(`📅 [CALENDAR DEBUG] Duration calculation:`, {
               originalDuration: context.meetingRequest.duration,

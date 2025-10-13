@@ -202,7 +202,7 @@ Respond with JSON:
       );
 
       // Extract dates/times mentioned with user's timezone
-      const preferredDates = this.extractPreferredDates(
+      const preferredDates = await this.extractPreferredDates(
         intent.extractedDetails.timeFrame || emailBody,
         userTimezone
       );
@@ -277,7 +277,7 @@ Respond with JSON:
 
   // Extract preferred dates/times from email and convert to actual dates
   // ENHANCED: Now handles specific time ranges like "Monday 2-3 PM" AND timezone detection
-  private extractPreferredDates(text: string, userTimezone: string | null = null): string[] {
+  private async extractPreferredDates(text: string, userTimezone: string | null = null): Promise<string[]> {
     console.log(`🕐 [TIME PARSING] Analyzing text for dates and times: "${text.substring(0, 100)}..."`);
 
     // Stage 0: Detect explicit timezone from email text (e.g., "10 AM EST")
@@ -314,8 +314,11 @@ Respond with JSON:
     // Convert all enhanced dates to actual dates using the chosen timezone
     const convertedDates = datesWithTimes.map(date => this.convertRelativeDate(date, timezoneToUse)).filter((date): date is string => date !== null);
 
-    console.log(`✅ [TIME PARSING] Final extracted dates:`, convertedDates);
-    return [...new Set(convertedDates)]; // Remove duplicates
+    // Stage 4: NEW - OpenAI fallback for dates without times (EDGE CASE ONLY)
+    const enhancedDates = await this.enhanceDatesWithAIIfNeeded(text, convertedDates, timezoneToUse);
+
+    console.log(`✅ [TIME PARSING] Final extracted dates:`, enhancedDates);
+    return [...new Set(enhancedDates)]; // Remove duplicates
   }
 
   /**
@@ -767,6 +770,83 @@ Respond with JSON:
     const daysUntilTarget = (targetDay - currentDay + 7) % 7;
     date.setDate(date.getDate() + (daysUntilTarget === 0 ? 7 : daysUntilTarget));
     return date;
+  }
+
+  /**
+   * Use OpenAI to extract time if regex failed (EDGE CASE FALLBACK)
+   * Only called when 50-char window doesn't find time - rare edge case (~5-10% of emails)
+   */
+  private async enhanceDatesWithAIIfNeeded(
+    emailText: string,
+    extractedDates: string[],
+    timezone: string
+  ): Promise<string[]> {
+
+    // Check if any date is missing time component
+    const datesNeedingTime = extractedDates.filter(date => {
+      // Check if date already has time in format like "3:30pm" or "10:00am" OR ISO format with time
+      return !date.match(/\d{1,2}:\d{2}(am|pm)/i) && !date.match(/T\d{2}:\d{2}:\d{2}/);
+    });
+
+    if (datesNeedingTime.length === 0) {
+      // All dates have times - no AI needed!
+      console.log(`✅ [AI FALLBACK] All dates have times, skipping AI extraction`);
+      return extractedDates;
+    }
+
+    console.log(`🤖 [AI FALLBACK] ${datesNeedingTime.length}/${extractedDates.length} dates missing times, calling OpenAI...`);
+
+    try {
+      const prompt = `Extract the EXACT meeting time from this email. Return ONLY the time in format "3:30 PM" or "10:00 AM". If no specific time is mentioned, return "NO_TIME".
+
+Email:
+"""
+${emailText.substring(0, 1000)}
+"""
+
+Time:`;
+
+      const response = await this.aiService.generateCompletion([{
+        role: 'user',
+        content: prompt
+      }], {
+        temperature: 0.1,
+        maxTokens: 20
+      });
+
+      const extractedTime = response.trim();
+
+      if (extractedTime === 'NO_TIME' || !extractedTime.match(/\d{1,2}(:\d{2})?\s*(am|pm)/i)) {
+        console.log(`⚠️ [AI FALLBACK] No time found by AI, keeping original dates`);
+        return extractedDates;
+      }
+
+      console.log(`✅ [AI FALLBACK] OpenAI extracted time: "${extractedTime}"`);
+
+      // Enhance dates that were missing times
+      const enhancedDates = extractedDates.map(date => {
+        // If date already has time (am/pm format OR ISO format), keep it as is
+        if (date.match(/\d{1,2}:\d{2}(am|pm)/i) || date.match(/T\d{2}:\d{2}:\d{2}/)) {
+          return date;
+        }
+        // Add AI-extracted time to dates without time
+        console.log(`🔧 [AI FALLBACK] Enhancing "${date}" with "${extractedTime}"`);
+        return `${date} ${extractedTime}`;
+      });
+
+      // Re-convert dates with new time information
+      const reconvertedDates = enhancedDates.map(date =>
+        this.convertRelativeDate(date, timezone)
+      ).filter((date): date is string => date !== null);
+
+      console.log(`✅ [AI FALLBACK] Re-converted dates with AI time:`, reconvertedDates);
+      return reconvertedDates;
+
+    } catch (error) {
+      console.error(`❌ [AI FALLBACK] Error calling OpenAI:`, error);
+      // Return original dates on error - don't break the flow
+      return extractedDates;
+    }
   }
 
   // Extract attendees mentioned in email
