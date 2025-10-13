@@ -12,16 +12,17 @@ import { env, features, initializeEnvironment } from './config/environment';
 initializeEnvironment();
 import { logger } from './utils/logger';
 import { monitoring, monitoringMiddleware } from './utils/monitoring';
-import { 
-  securityHeaders, 
-  requestLogging, 
+import {
+  securityHeaders,
+  requestLogging,
   errorHandler,
   healthCheckBypass,
   authRateLimit,
-  apiRateLimit
+  apiRateLimit,
+  shutdownSecurity
 } from './middleware/security';
 import healthRoutes from './routes/health';
-import { testConnection, initializeDatabase, pool } from './database/connection';
+import { testConnection, initializeDatabase, pool, closePool } from './database/connection';
 import { GmailService } from './services/gmail';
 import { EmailModel } from './models/Email';
 import { AIService } from './services/ai';
@@ -43,6 +44,7 @@ import { UserProfileService } from './services/userProfile';
 import { IntelligentEmailRouter } from './services/intelligentEmailRouter';
 import { WebhookRenewalService } from './services/webhookRenewal';
 import { WebhookTestingSuite } from './services/webhookTesting';
+import { semanticSearchService } from './services/semanticSearchService';
 import { google } from 'googleapis';
 import { authMiddleware, getUserId } from './middleware/auth';
 import authRoutes from './routes/auth';
@@ -95,12 +97,12 @@ async function initializeServices() {
     port: env.PORT,
     version: '0.1.0'
   });
-  
+
   // Test database connection
   const dbConnected = await testConnection();
   if (!dbConnected) {
     logger.error('❌ Cannot connect to database. Please check your DATABASE_URL configuration');
-    process.exit(1);
+    throw new Error('Database connection failed. Check DATABASE_URL environment variable.');
   }
 
   // Initialize database schema
@@ -480,6 +482,126 @@ app.get('/emails', authMiddleware.authenticate, async (req, res) => {
   } catch (error) {
     console.error('❌ Error retrieving emails:', error);
     res.status(500).json({ error: 'Failed to retrieve emails' });
+  }
+});
+
+// Semantic Search API endpoint
+app.get('/emails/search', authMiddleware.authenticate, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { q, limit, threshold, mode } = req.query;
+
+    // Validate query parameter
+    if (!q || typeof q !== 'string' || q.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Missing or invalid query parameter',
+        message: 'Please provide a non-empty "q" query parameter'
+      });
+    }
+
+    const query = q.trim();
+
+    // Validate limit
+    const searchLimit = limit ? parseInt(limit as string) : 20;
+    if (isNaN(searchLimit) || searchLimit < 1 || searchLimit > 100) {
+      return res.status(400).json({
+        error: 'Invalid limit parameter',
+        message: 'Limit must be between 1 and 100'
+      });
+    }
+
+    // Validate threshold
+    const searchThreshold = threshold ? parseFloat(threshold as string) : 0.8;
+    if (isNaN(searchThreshold) || searchThreshold < 0 || searchThreshold > 1) {
+      return res.status(400).json({
+        error: 'Invalid threshold parameter',
+        message: 'Threshold must be between 0 and 1'
+      });
+    }
+
+    console.log(`🔍 Search request: "${query}" (user: ${userId}, limit: ${searchLimit}, threshold: ${searchThreshold})`);
+
+    // Check embedding coverage first
+    const stats = await semanticSearchService.getSearchStats(userId);
+
+    if (stats.emailsWithEmbeddings === 0) {
+      return res.status(503).json({
+        error: 'Search not ready',
+        message: 'No emails have been indexed yet. Please run the embedding backfill script first.',
+        stats
+      });
+    }
+
+    // Perform search
+    const startTime = Date.now();
+    let results;
+
+    if (mode === 'semantic') {
+      // Semantic-only mode
+      results = await semanticSearchService.semanticSearch(query, {
+        userId,
+        limit: searchLimit,
+        threshold: searchThreshold
+      });
+    } else {
+      // Hybrid mode (default)
+      results = await semanticSearchService.search(query, {
+        userId,
+        limit: searchLimit,
+        threshold: searchThreshold
+      });
+    }
+
+    const queryTime = Date.now() - startTime;
+
+    res.json({
+      query,
+      results: results.map(r => ({
+        id: r.id,
+        gmail_id: r.gmail_id,
+        subject: r.subject,
+        from: r.from_email,
+        to: r.to_email,
+        body_preview: r.body,
+        received_at: r.received_at,
+        relevance_score: r.relevance_score,
+        match_type: r.match_type,
+        match_explanation: semanticSearchService.explainMatch(r)
+      })),
+      metadata: {
+        total_results: results.length,
+        query_time_ms: queryTime,
+        threshold_used: searchThreshold,
+        search_mode: mode || 'hybrid',
+        ...stats
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ Search error:', error);
+    res.status(500).json({
+      error: 'Search failed',
+      message: error.message
+    });
+  }
+});
+
+// Search stats endpoint (for debugging)
+app.get('/emails/search/stats', authMiddleware.authenticate, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const stats = await semanticSearchService.getSearchStats(userId);
+
+    res.json({
+      ...stats,
+      ready: stats.emailsWithEmbeddings > 0,
+      message: stats.emailsWithEmbeddings === 0
+        ? 'Run embedding backfill to enable search'
+        : `Search ready with ${stats.emailsWithEmbeddings} indexed emails`
+    });
+  } catch (error: any) {
+    console.error('❌ Stats error:', error);
+    res.status(500).json({ error: 'Failed to get stats' });
   }
 });
 
@@ -1014,10 +1136,25 @@ app.post('/ai/generate-drafts', authMiddleware.authenticate, async (req, res) =>
   }
 });
 
-app.get('/drafts', async (req, res) => {
+// Legacy endpoint - protected for security (consider deprecating in favor of /auto-drafts)
+app.get('/drafts', authMiddleware.authenticate, async (req, res) => {
   try {
-    const drafts = await draftModel.getPendingDrafts(20);
-    
+    const userId = getUserId(req);
+
+    // Get pending drafts with user filtering via email join
+    const query = `
+      SELECT d.*, e.subject as original_subject, e.from_email
+      FROM drafts d
+      JOIN emails e ON d.email_id = e.id
+      WHERE d.status IN ('pending', 'pending_user_action')
+        AND e.user_id = $1
+      ORDER BY d.created_at DESC
+      LIMIT 20
+    `;
+
+    const result = await pool.query(query, [userId]);
+    const drafts = result.rows;
+
     res.json({
       drafts: drafts.map(draft => ({
         id: draft.id,
@@ -1039,18 +1176,24 @@ app.get('/drafts', async (req, res) => {
   }
 });
 
-app.get('/drafts/:id', async (req, res) => {
+// Legacy endpoint - protected with user isolation (consider deprecating in favor of /auto-drafts/:id)
+app.get('/drafts/:id', authMiddleware.authenticate, async (req, res) => {
   try {
     const draftId = parseInt(req.params.id);
-    
-    // Get draft by ID directly from database
-    const query = 'SELECT * FROM drafts WHERE id = $1';
-    const result = await pool.query(query, [draftId]);
-    
+    const userId = getUserId(req);
+
+    // Get draft by ID with user verification via email join
+    const query = `
+      SELECT d.* FROM drafts d
+      JOIN emails e ON d.email_id = e.id
+      WHERE d.id = $1 AND e.user_id = $2
+    `;
+    const result = await pool.query(query, [draftId, userId]);
+
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Draft not found' });
+      return res.status(404).json({ error: 'Draft not found or access denied' });
     }
-    
+
     res.json(result.rows[0]);
   } catch (error) {
     console.error('❌ Error fetching draft:', error);
@@ -1682,18 +1825,29 @@ ${closing}${name ? '\n' + name : ''}`;
   }
 });
 
-// DELETE /auto-drafts/:id - Delete unwanted draft
-app.delete('/auto-drafts/:id', async (req, res) => {
+// DELETE /auto-drafts/:id - Delete unwanted draft (USER-PROTECTED)
+app.delete('/auto-drafts/:id', authMiddleware.authenticate, async (req, res) => {
   try {
     const draftId = parseInt(req.params.id);
-    
+    const userId = req.userId;
+
+    // Verify authentication
+    if (!userId) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
     const existingDraft = await autoGeneratedDraftModel.getDraftById(draftId);
     if (!existingDraft) {
       return res.status(404).json({ error: 'Auto-generated draft not found' });
     }
 
+    // CRITICAL: Verify the draft belongs to the authenticated user
+    if (existingDraft.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied: Draft belongs to another user' });
+    }
+
     await autoGeneratedDraftModel.updateDraftStatus(draftId, 'deleted');
-    
+
     res.json({
       message: 'Auto-generated draft deleted successfully',
       draftId: draftId
@@ -1704,18 +1858,30 @@ app.delete('/auto-drafts/:id', async (req, res) => {
   }
 });
 
-// POST /auto-drafts/:id/approve - Approve draft without changes
-app.post('/auto-drafts/:id/approve', async (req, res) => {
+// POST /auto-drafts/:id/approve - Approve draft without changes (USER-PROTECTED)
+app.post('/auto-drafts/:id/approve', authMiddleware.authenticate, async (req, res) => {
   try {
     const draftId = parseInt(req.params.id);
+    const userId = req.userId;
+
+    // Verify authentication
+    if (!userId) {
+      return res.status(401).json({ error: 'User authentication required' });
+    }
+
     const draft = await autoGeneratedDraftModel.getDraftById(draftId);
-    
+
     if (!draft) {
       return res.status(404).json({ error: 'Auto-generated draft not found' });
     }
 
+    // CRITICAL: Verify the draft belongs to the authenticated user
+    if (draft.user_id !== userId) {
+      return res.status(403).json({ error: 'Access denied: Draft belongs to another user' });
+    }
+
     await autoGeneratedDraftModel.updateDraftStatus(draftId, 'reviewed');
-    
+
     res.json({
       message: 'Auto-generated draft approved successfully',
       draftId: draftId,
@@ -1797,7 +1963,8 @@ if (require.main === module) {
     });
 
     // Schema management endpoint (temporary for fixing issues)
-    app.post('/admin/reset-context-schema', async (req, res) => {
+    // ⚠️ PROTECTED: Requires authentication - can drop/recreate database schema
+    app.post('/admin/reset-context-schema', authMiddleware.authenticate, async (req, res) => {
       try {
         const fs = require('fs');
         const path = require('path');
@@ -1829,7 +1996,8 @@ if (require.main === module) {
     });
 
     // Apply Phase 2.3 schema (temporary endpoint)
-    app.post('/admin/apply-phase23-schema', async (req, res) => {
+    // ⚠️ PROTECTED: Requires authentication - modifies database schema
+    app.post('/admin/apply-phase23-schema', authMiddleware.authenticate, async (req, res) => {
       try {
         const fs = require('fs');
         const path = require('path');
@@ -1855,7 +2023,8 @@ if (require.main === module) {
     });
 
     // Fix missing context_used column
-    app.post('/admin/fix-context-column', async (req, res) => {
+    // ⚠️ PROTECTED: Requires authentication - alters database columns
+    app.post('/admin/fix-context-column', authMiddleware.authenticate, async (req, res) => {
       try {
         const fs = require('fs');
         const path = require('path');
@@ -1916,7 +2085,8 @@ if (require.main === module) {
     });
 
     // Manual schema application endpoint
-    app.post('/admin/apply-phase2-2-schema', async (req, res) => {
+    // ⚠️ PROTECTED: Requires authentication - modifies database schema
+    app.post('/admin/apply-phase2-2-schema', authMiddleware.authenticate, async (req, res) => {
       try {
         const fs = require('fs');
         const path = require('path');
@@ -1938,7 +2108,8 @@ if (require.main === module) {
       }
     });
 
-    app.post('/admin/apply-phase3-calendar-schema', async (req, res) => {
+    // ⚠️ PROTECTED: Requires authentication - modifies database schema
+    app.post('/admin/apply-phase3-calendar-schema', authMiddleware.authenticate, async (req, res) => {
       try {
         const fs = require('fs');
         const path = require('path');
@@ -1965,7 +2136,8 @@ if (require.main === module) {
     });
 
     // Add webhook_processed flag migration
-    app.post('/admin/add-webhook-processed-flag', async (req, res) => {
+    // ⚠️ PROTECTED: Requires authentication - alters database structure
+    app.post('/admin/add-webhook-processed-flag', authMiddleware.authenticate, async (req, res) => {
       try {
         const fs = require('fs');
         const path = require('path');
@@ -3735,14 +3907,48 @@ app.get('/test/webhook-health', async (_req, res) => {
 app.use(errorHandler);
 
 // Graceful shutdown handling
-process.on('SIGTERM', () => {
+process.on('SIGTERM', async () => {
   logger.info('SIGTERM received, shutting down gracefully');
-  process.exit(0);
+
+  try {
+    // Shutdown in order: stop new work first, then cleanup resources
+    monitoring.shutdown();
+    shutdownSecurity();
+    if (webhookRenewalService) {
+      webhookRenewalService.stopRenewalService();
+    }
+
+    // Close database pool (wait for in-flight queries to complete)
+    await closePool();
+
+    logger.info('✅ Graceful shutdown completed');
+    process.exit(0);
+  } catch (error) {
+    logger.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
 });
 
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');  
-  process.exit(0);
+process.on('SIGINT', async () => {
+  logger.info('SIGINT received, shutting down gracefully');
+
+  try {
+    // Shutdown in order: stop new work first, then cleanup resources
+    monitoring.shutdown();
+    shutdownSecurity();
+    if (webhookRenewalService) {
+      webhookRenewalService.stopRenewalService();
+    }
+
+    // Close database pool (wait for in-flight queries to complete)
+    await closePool();
+
+    logger.info('✅ Graceful shutdown completed');
+    process.exit(0);
+  } catch (error) {
+    logger.error('❌ Error during shutdown:', error);
+    process.exit(1);
+  }
 });
 
 // Start server
@@ -4814,8 +5020,29 @@ initializeServices().then(() => {
         console.log('   GET  /gmail/webhook-status  - Check webhook subscription status');
         console.log('   POST /gmail/stop-webhook    - Stop Gmail push notifications');
         }
-        
+
       });
+    })
+    .catch((error) => {
+      // Critical startup error - server cannot start
+      logger.error('❌ FATAL: Failed to initialize services', {
+        error: error.message,
+        stack: error.stack
+      });
+
+      console.error('\n========================================');
+      console.error('❌ SERVER STARTUP FAILED');
+      console.error('========================================');
+      console.error('Error:', error.message);
+      console.error('\nPossible causes:');
+      console.error('  - Database connection failed (check DATABASE_URL)');
+      console.error('  - Required environment variables missing');
+      console.error('  - Service initialization error');
+      console.error('\nServer will now exit.');
+      console.error('========================================\n');
+
+      // Exit with error code so orchestration tools (Docker/Kubernetes) know startup failed
+      process.exit(1);
     });
   }
 }

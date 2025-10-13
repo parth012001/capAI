@@ -1,5 +1,5 @@
 import { pool } from '../database/connection';
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 // Encryption configuration
 const ENCRYPTION_KEY = process.env.TOKEN_ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');

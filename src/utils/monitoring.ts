@@ -42,6 +42,7 @@ class MonitoringService {
   private requestTimes: number[] = [];
   private readonly MAX_SLOW_QUERIES = 10;
   private readonly MAX_RECENT_ERRORS = 20;
+  private metricsUpdateInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     this.metrics = {
@@ -66,7 +67,7 @@ class MonitoringService {
     };
 
     // Update system metrics periodically
-    setInterval(() => {
+    this.metricsUpdateInterval = setInterval(() => {
       this.updateSystemMetrics();
     }, 30000); // Every 30 seconds
   }
@@ -203,6 +204,18 @@ class MonitoringService {
       }
     };
     this.requestTimes = [];
+  }
+
+  /**
+   * Shutdown monitoring service and cleanup resources
+   * Call this during graceful shutdown to prevent memory leaks
+   */
+  shutdown(): void {
+    if (this.metricsUpdateInterval) {
+      clearInterval(this.metricsUpdateInterval);
+      this.metricsUpdateInterval = null;
+      logger.info('🛑 Monitoring service shut down successfully');
+    }
   }
 
   private updateAverageResponseTime(): void {

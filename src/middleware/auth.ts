@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import * as jwt from 'jsonwebtoken';
 import { TokenStorageService } from '../services/tokenStorage';
 
 // Extend Express Request type to include user context
@@ -179,15 +179,19 @@ export class AuthMiddleware {
 // Export singleton instance
 export const authMiddleware = new AuthMiddleware();
 
-// Helper function to get user ID with fallback (for gradual migration)
+// Helper function to get user ID - requires authentication
+// All endpoints using this MUST have authMiddleware.authenticate
 export function getUserId(req: Request): string {
   if (req.userId) {
     return req.userId;
   }
-  
-  // Fallback for development/testing
-  console.warn('⚠️ No user context found, using default user for development');
-  return 'default_user';
+
+  // SECURITY: No fallback - fail loudly if auth is missing
+  throw new Error(
+    'SECURITY ERROR: getUserId() called without user context. ' +
+    'This endpoint must use authMiddleware.authenticate middleware. ' +
+    'Check that the route has authMiddleware.authenticate before the handler.'
+  );
 }
 
 // Helper function for user email

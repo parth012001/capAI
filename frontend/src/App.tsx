@@ -8,6 +8,7 @@ import SignInPage from './pages/SignInPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
 import ProfileSetupPage from './pages/ProfileSetupPage';
 import DashboardPage from './pages/DashboardPage';
+import SearchPage from './pages/SearchPage';
 import SystemStatusPage from './pages/SystemStatusPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsOfUsePage from './pages/TermsOfUsePage';
@@ -108,21 +109,29 @@ function AppContent() {
 							</ProtectedRoute>
 						} 
 					/>
-					<Route 
-						path="/dashboard" 
+					<Route
+						path="/dashboard"
 						element={
 							<ProtectedRoute>
 								<DashboardPage />
 							</ProtectedRoute>
-						} 
+						}
 					/>
-					<Route 
-						path="/system-status" 
+					<Route
+						path="/search"
+						element={
+							<ProtectedRoute>
+								<SearchPage />
+							</ProtectedRoute>
+						}
+					/>
+					<Route
+						path="/system-status"
 						element={
 							<ProtectedRoute>
 								<SystemStatusPage />
 							</ProtectedRoute>
-						} 
+						}
 					/>
 					
 					{/* Fallback route */}

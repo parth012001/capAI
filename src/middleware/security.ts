@@ -59,7 +59,7 @@ const authLimiter = new RateLimiter(10, 15 * 60 * 1000);     // 10 auth requests
 const apiLimiter = new RateLimiter(200, 15 * 60 * 1000);     // 200 API requests per 15 minutes
 
 // Cleanup old entries every 5 minutes
-setInterval(() => {
+let rateLimiterCleanupInterval: NodeJS.Timeout | null = setInterval(() => {
   generalLimiter.cleanup();
   authLimiter.cleanup();
   apiLimiter.cleanup();
@@ -187,9 +187,21 @@ export function healthCheckBypass(req: Request, res: Response, next: NextFunctio
   if (req.path === '/health' || req.path === '/health/ready') {
     return next();
   }
-  
+
   // Apply security middleware for all other endpoints
   securityHeaders(req, res, () => {
     rateLimit()(req, res, next);
   });
+}
+
+/**
+ * Shutdown security middleware and cleanup resources
+ * Call this during graceful shutdown to prevent memory leaks
+ */
+export function shutdownSecurity(): void {
+  if (rateLimiterCleanupInterval) {
+    clearInterval(rateLimiterCleanupInterval);
+    rateLimiterCleanupInterval = null;
+    logger.info('🛑 Security middleware shut down successfully');
+  }
 }

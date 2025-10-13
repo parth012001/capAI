@@ -1,5 +1,6 @@
 // React import not needed for modern JSX transform
-import { Mail, Megaphone, Brain, Calendar } from 'lucide-react';
+import { Mail, Megaphone, Brain, Calendar, Search } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '../ui';
 import type { DashboardTab } from '../../types/promotionalEmail';
 
@@ -11,6 +12,8 @@ interface DashboardTabsProps {
 }
 
 export function DashboardTabs({ activeTab, onTabChange, unreadPromotionalCount = 0, pendingDraftCount = 0 }: DashboardTabsProps) {
+  const navigate = useNavigate();
+
   const tabs = [
     {
       id: 'active' as DashboardTab,
@@ -42,8 +45,9 @@ export function DashboardTabs({ activeTab, onTabChange, unreadPromotionalCount =
 
   return (
     <div className="border-b border-slate-200 mb-6">
-      <nav className="flex space-x-8" aria-label="Dashboard navigation">
-        {tabs.map((tab) => {
+      <nav className="flex items-center justify-between" aria-label="Dashboard navigation">
+        <div className="flex space-x-8">
+          {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
           
@@ -91,6 +95,16 @@ export function DashboardTabs({ activeTab, onTabChange, unreadPromotionalCount =
             </button>
           );
         })}
+        </div>
+
+        {/* Search Button */}
+        <button
+          onClick={() => navigate('/search')}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+        >
+          <Search className="w-4 h-4" />
+          Search Emails
+        </button>
       </nav>
     </div>
   );

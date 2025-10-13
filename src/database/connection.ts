@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import dotenv from 'dotenv';
+import * as dotenv from 'dotenv';
 
 dotenv.config();
 
@@ -18,6 +18,20 @@ export async function testConnection() {
   } catch (error) {
     console.error('❌ Database connection failed:', error);
     return false;
+  }
+}
+
+/**
+ * Gracefully close database connection pool
+ * Call this during server shutdown to prevent connection leaks
+ */
+export async function closePool(): Promise<void> {
+  try {
+    await pool.end();
+    console.log('✅ Database pool closed successfully');
+  } catch (error) {
+    console.error('❌ Error closing database pool:', error);
+    throw error;
   }
 }
 
