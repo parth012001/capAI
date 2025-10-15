@@ -12,6 +12,7 @@ import { env, features, initializeEnvironment } from './config/environment';
 initializeEnvironment();
 import { logger } from './utils/logger';
 import { monitoring, monitoringMiddleware } from './utils/monitoring';
+import { redis } from './utils/redis';
 import {
   securityHeaders,
   requestLogging,
@@ -45,6 +46,8 @@ import { IntelligentEmailRouter } from './services/intelligentEmailRouter';
 import { WebhookRenewalService } from './services/webhookRenewal';
 import { WebhookTestingSuite } from './services/webhookTesting';
 import { semanticSearchService } from './services/semanticSearchService';
+import { voiceService } from './services/voiceService';
+import multer from 'multer';
 import { google } from 'googleapis';
 import { authMiddleware, getUserId } from './middleware/auth';
 import authRoutes from './routes/auth';
@@ -67,6 +70,28 @@ if (features.enableCORS) {
     credentials: true
   }));
 }
+
+// Configure multer for audio file uploads (voice features)
+// Store files in memory as Buffer for processing
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25 MB limit (Whisper API limit)
+  },
+  fileFilter: (req, file, cb) => {
+    // Only allow audio formats supported by Whisper
+    const allowedMimeTypes = [
+      'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/webm',
+      'audio/mp4', 'audio/m4a', 'audio/ogg', 'audio/flac'
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Unsupported audio format: ${file.mimetype}. Supported formats: mp3, wav, webm, mp4, m4a, ogg, flac`));
+    }
+  }
+});
 
 // Global instances
 let gmailService: GmailService;
@@ -605,6 +630,215 @@ app.get('/emails/search/stats', authMiddleware.authenticate, async (req, res) =>
   }
 });
 
+// ============================================================================
+// Voice AI API Endpoints
+// ============================================================================
+
+/**
+ * POST /voice/transcribe
+ * Upload audio file and get transcription (Speech-to-Text)
+ *
+ * Body: multipart/form-data with 'audio' file field
+ * Supported formats: mp3, wav, webm, mp4, m4a, ogg, flac
+ * Max size: 25 MB
+ */
+app.post('/voice/transcribe', authMiddleware.authenticate, audioUpload.single('audio'), async (req, res) => {
+  try {
+    const userId = getUserId(req);
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Missing audio file',
+        message: 'Please upload an audio file in the "audio" field'
+      });
+    }
+
+    console.log(`🎤 [VOICE API] Transcription request from user: ${userId}`);
+    console.log(`📁 [VOICE API] File: ${req.file.originalname}, Size: ${(req.file.size / 1024).toFixed(2)} KB`);
+
+    // Call voice service
+    const result = await voiceService.speechToText(
+      req.file.buffer,
+      req.file.originalname,
+      {
+        language: req.body.language, // Optional: 'en', 'es', etc.
+        temperature: req.body.temperature ? parseFloat(req.body.temperature) : 0,
+      }
+    );
+
+    res.json({
+      success: true,
+      transcription: result.text,
+      language: result.language,
+      metadata: {
+        filename: req.file.originalname,
+        fileSize: req.file.size,
+        duration: result.duration,
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ [VOICE API] Transcription error:', error);
+
+    res.status(500).json({
+      error: 'Transcription failed',
+      message: error.message || 'Failed to transcribe audio'
+    });
+  }
+});
+
+/**
+ * POST /voice/speak
+ * Convert text to speech (Text-to-Speech)
+ *
+ * Body: JSON with 'text' field
+ * Optional: voice, speed, model, format
+ * Returns: Audio file (mp3 by default)
+ */
+app.post('/voice/speak', authMiddleware.authenticate, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { text, voice, speed, model, format } = req.body;
+
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Missing text',
+        message: 'Please provide a non-empty "text" field'
+      });
+    }
+
+    console.log(`🔊 [VOICE API] Text-to-speech request from user: ${userId}`);
+    console.log(`📝 [VOICE API] Text length: ${text.length} characters`);
+
+    // Call voice service
+    const audioBuffer = await voiceService.textToSpeech(text, {
+      voice: voice || 'nova',
+      speed: speed ? parseFloat(speed) : 1.0,
+      model: model || 'tts-1',
+      response_format: format || 'mp3',
+    });
+
+    // Set appropriate headers for audio response
+    const contentType = format === 'wav' ? 'audio/wav' :
+                       format === 'ogg' ? 'audio/ogg' :
+                       format === 'flac' ? 'audio/flac' :
+                       'audio/mpeg'; // mp3 default
+
+    res.set({
+      'Content-Type': contentType,
+      'Content-Length': audioBuffer.length,
+      'Content-Disposition': `attachment; filename="speech.${format || 'mp3'}"`,
+    });
+
+    res.send(audioBuffer);
+
+  } catch (error: any) {
+    console.error('❌ [VOICE API] Text-to-speech error:', error);
+
+    res.status(500).json({
+      error: 'Text-to-speech failed',
+      message: error.message || 'Failed to generate speech'
+    });
+  }
+});
+
+/**
+ * POST /voice/search
+ * Voice-powered semantic search (Full pipeline: Speech → Search → Speech)
+ *
+ * Body: multipart/form-data with 'audio' file field
+ * Returns: JSON with transcription, search results, and response audio
+ */
+app.post('/voice/search', authMiddleware.authenticate, audioUpload.single('audio'), async (req, res) => {
+  try {
+    const userId = getUserId(req);
+
+    if (!req.file) {
+      return res.status(400).json({
+        error: 'Missing audio file',
+        message: 'Please upload an audio file in the "audio" field'
+      });
+    }
+
+    console.log(`🎯 [VOICE API] Voice search request from user: ${userId}`);
+    console.log(`📁 [VOICE API] File: ${req.file.originalname}`);
+
+    // Execute full voice query pipeline
+    const result = await voiceService.processVoiceQuery(
+      req.file.buffer,
+      req.file.originalname,
+      // Inject semantic search function
+      async (query: string) => {
+        const searchResults = await semanticSearchService.search(query, {
+          userId,
+          limit: 10,
+          threshold: 0.4,
+        });
+
+        return {
+          results: searchResults.map(r => ({
+            id: r.id,
+            gmail_id: r.gmail_id,
+            subject: r.subject,
+            from: r.from_email,
+            body_preview: r.body.substring(0, 200),
+            relevance_score: r.relevance_score,
+            match_type: r.match_type,
+          })),
+        };
+      }
+    );
+
+    // Return JSON response with audio as base64
+    res.json({
+      success: true,
+      query: result.transcribedQuery,
+      enhancedQuery: result.enhancedQuery, // Show what was actually searched
+      responseText: result.responseText,
+      searchResults: result.searchResults,
+      audioResponse: result.responseAudio.toString('base64'), // Base64 encoded audio
+      metadata: {
+        filename: req.file.originalname,
+        fileSize: req.file.size,
+        audioFormat: 'mp3',
+      }
+    });
+
+  } catch (error: any) {
+    console.error('❌ [VOICE API] Voice search error:', error);
+
+    res.status(500).json({
+      error: 'Voice search failed',
+      message: error.message || 'Failed to process voice search'
+    });
+  }
+});
+
+/**
+ * GET /voice/health
+ * Check voice service health status
+ */
+app.get('/voice/health', authMiddleware.authenticate, async (req, res) => {
+  try {
+    const health = await voiceService.getHealthStatus();
+
+    res.json({
+      ...health,
+      endpoints: {
+        transcribe: '/voice/transcribe',
+        speak: '/voice/speak',
+        search: '/voice/search',
+      }
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      status: 'unhealthy',
+      error: error.message
+    });
+  }
+});
+
+// ============================================================================
 // Promotional Emails API endpoints
 
 // Meeting Pipeline API Endpoints
@@ -3932,6 +4166,9 @@ process.on('SIGTERM', async () => {
       webhookRenewalService.stopRenewalService();
     }
 
+    // Close Redis connection
+    await redis.close();
+
     // Close database pool (wait for in-flight queries to complete)
     await closePool();
 
@@ -3954,6 +4191,9 @@ process.on('SIGINT', async () => {
       webhookRenewalService.stopRenewalService();
     }
 
+    // Close Redis connection
+    await redis.close();
+
     // Close database pool (wait for in-flight queries to complete)
     await closePool();
 
@@ -3963,6 +4203,49 @@ process.on('SIGINT', async () => {
     logger.error('❌ Error during shutdown:', error);
     process.exit(1);
   }
+});
+
+// PRODUCTION: Handle unhandled promise rejections
+// Prevents server crashes from async errors
+process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+  logger.error('❌ [CRITICAL] Unhandled Promise Rejection:', {
+    reason: reason?.message || reason,
+    stack: reason?.stack,
+    promise: promise
+  });
+
+  // In production, log and continue (don't crash)
+  // In development, we want to know about these immediately
+  if (env.NODE_ENV !== 'production') {
+    console.error('💥 Unhandled Rejection Details:', reason);
+  }
+});
+
+// PRODUCTION: Handle uncaught exceptions
+// Last resort error handler - log and gracefully shutdown
+process.on('uncaughtException', async (error: Error) => {
+  logger.error('❌ [FATAL] Uncaught Exception - Server shutting down:', {
+    message: error.message,
+    stack: error.stack,
+    name: error.name
+  });
+
+  // Attempt graceful shutdown
+  try {
+    monitoring.shutdown();
+    shutdownSecurity();
+    if (webhookRenewalService) {
+      webhookRenewalService.stopRenewalService();
+    }
+    await redis.close();
+    await closePool();
+    logger.info('✅ Emergency shutdown completed');
+  } catch (shutdownError) {
+    logger.error('❌ Error during emergency shutdown:', shutdownError);
+  }
+
+  // Exit with error code
+  process.exit(1);
 });
 
 // Start server
@@ -4000,13 +4283,31 @@ initializeServices().then(() => {
             const notification = JSON.parse(messageData);
             console.log('🎯 Gmail notification:', notification);
 
+            // PRODUCTION: Idempotency check to prevent duplicate processing
+            // Use historyId as unique identifier for this webhook event
+            const lockKey = `webhook:gmail:${notification.historyId || Date.now()}`;
+            const lockAcquired = await redis.acquireLock(lockKey, 300); // 5 min TTL
+
+            if (!lockAcquired) {
+              console.log('⏭️  [WEBHOOK] Skipping duplicate - already processing this historyId');
+              return;
+            }
+
+            console.log('🔒 [WEBHOOK] Lock acquired - processing notification');
+
             // Process the notification asynchronously FOR ALL ACTIVE USERS
             processGmailNotificationMultiUser(notification).then(() => {
               // Update processing heartbeat
               webhookHeartbeat.lastProcessed = new Date();
               webhookHeartbeat.totalProcessed++;
+              console.log('✅ [WEBHOOK] Processing complete');
+
+              // Keep lock for 5 minutes to prevent reprocessing
+              // Lock will auto-expire after TTL
             }).catch(error => {
               console.error('❌ Error processing Gmail notification:', error);
+              // Release lock on error to allow retry
+              redis.releaseLock(lockKey);
             });
           } catch (parseError) {
             console.error('❌ Error parsing Gmail webhook message:', parseError);

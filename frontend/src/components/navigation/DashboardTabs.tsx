@@ -1,5 +1,5 @@
 // React import not needed for modern JSX transform
-import { Mail, Megaphone, Brain, Calendar, Search } from 'lucide-react';
+import { Mail, Megaphone, Brain, Calendar, Search, Mic } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Badge } from '../ui';
 import type { DashboardTab } from '../../types/promotionalEmail';
@@ -97,14 +97,23 @@ export function DashboardTabs({ activeTab, onTabChange, unreadPromotionalCount =
         })}
         </div>
 
-        {/* Search Button */}
-        <button
-          onClick={() => navigate('/search')}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-        >
-          <Search className="w-4 h-4" />
-          Search Emails
-        </button>
+        {/* Search Buttons */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/voice')}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all text-sm font-medium shadow-sm"
+          >
+            <Mic className="w-4 h-4" />
+            Voice Search
+          </button>
+          <button
+            onClick={() => navigate('/search')}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          >
+            <Search className="w-4 h-4" />
+            Search Emails
+          </button>
+        </div>
       </nav>
     </div>
   );

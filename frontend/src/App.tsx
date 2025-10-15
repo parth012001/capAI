@@ -9,6 +9,7 @@ import AuthCallbackPage from './pages/AuthCallbackPage';
 import ProfileSetupPage from './pages/ProfileSetupPage';
 import DashboardPage from './pages/DashboardPage';
 import SearchPage from './pages/SearchPage';
+import VoiceSearchPage from './pages/VoiceSearchPage';
 import SystemStatusPage from './pages/SystemStatusPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsOfUsePage from './pages/TermsOfUsePage';
@@ -122,6 +123,14 @@ function AppContent() {
 						element={
 							<ProtectedRoute>
 								<SearchPage />
+							</ProtectedRoute>
+						}
+					/>
+					<Route
+						path="/voice"
+						element={
+							<ProtectedRoute>
+								<VoiceSearchPage />
 							</ProtectedRoute>
 						}
 					/>

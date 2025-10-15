@@ -6,19 +6,148 @@ dotenv.config();
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+  // NEON connection pooling configuration - PRODUCTION READY
+  max: 100, // Maximum concurrent connections (supports 100 concurrent users)
+  min: 10, // Keep 10 connections warm for faster response times
+  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  connectionTimeoutMillis: 30000, // 30 seconds for NEON cold starts (serverless wake-up)
+  // Query timeout: 30 seconds (prevents queries from hanging)
+  query_timeout: 30000,
+  // Enable keep-alive to prevent NEON from dropping idle connections
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000, // Start sending keep-alive after 10 seconds
 });
 
-export async function testConnection() {
-  try {
-    const client = await pool.connect();
-    const result = await client.query('SELECT NOW()');
-    console.log('✅ Database connected successfully:', result.rows[0].now);
-    client.release();
-    return true;
-  } catch (error) {
-    console.error('❌ Database connection failed:', error);
-    return false;
+// Critical: Pool error handler to prevent server crashes
+// This catches connection drops from NEON's serverless pooler
+pool.on('error', (err: any, client) => {
+  console.error('❌ [POOL ERROR] Unexpected database pool error:', {
+    message: err.message,
+    code: err.code,
+    stack: err.stack,
+    timestamp: new Date().toISOString()
+  });
+  // Don't exit - let the pool handle reconnection automatically
+  // pg-pool will remove the broken connection and create a new one when needed
+});
+
+// Log when new connections are created (helps with debugging)
+pool.on('connect', (client) => {
+  console.log('✅ [POOL] New database connection established');
+});
+
+// Log when connections are removed (helps track connection lifecycle)
+pool.on('remove', (client) => {
+  console.log('🔄 [POOL] Database connection removed from pool');
+});
+
+/**
+ * Execute a query with automatic retry on connection errors
+ * This helps recover from NEON connection drops without crashing
+ */
+export async function queryWithRetry<T = any>(
+  queryText: string,
+  params?: any[],
+  maxRetries: number = 2
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await pool.query(queryText, params);
+      return result as T;
+    } catch (error: any) {
+      lastError = error;
+
+      // Only retry on connection errors, not on SQL errors
+      const isConnectionError =
+        error.code === 'ECONNRESET' ||
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === 'EADDRNOTAVAIL' ||
+        error.message?.includes('Connection terminated') ||
+        error.message?.includes('Connection closed');
+
+      if (isConnectionError && attempt < maxRetries) {
+        console.warn(`⚠️  [RETRY] Database connection error, attempt ${attempt}/${maxRetries}:`, {
+          code: error.code,
+          message: error.message
+        });
+        // Wait a bit before retrying (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+        continue;
+      }
+
+      // Either not a connection error, or we've exhausted retries
+      throw error;
+    }
   }
+
+  throw lastError || new Error('Query failed after retries');
+}
+
+export async function testConnection(maxRetries = 3, retryDelay = 2000) {
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔌 [DATABASE] Connection attempt ${attempt}/${maxRetries}...`);
+
+      const startTime = Date.now();
+      const client = await pool.connect();
+      const result = await client.query('SELECT NOW()');
+      const connectionTime = Date.now() - startTime;
+
+      console.log(`✅ Database connected successfully in ${connectionTime}ms:`, result.rows[0].now);
+
+      // Warn if connection was slow (indicates cold start)
+      if (connectionTime > 5000) {
+        console.warn(`⚠️  [DATABASE] Slow connection detected (${connectionTime}ms) - NEON cold start likely occurred`);
+      }
+
+      client.release();
+      return true;
+
+    } catch (error: any) {
+      lastError = error;
+
+      // Check if this is a timeout/connection error worth retrying
+      const isRetryableError =
+        error.message?.includes('timeout') ||
+        error.message?.includes('Connection terminated') ||
+        error.message?.includes('ECONNREFUSED') ||
+        error.message?.includes('ETIMEDOUT') ||
+        error.code === 'ECONNREFUSED' ||
+        error.code === 'ETIMEDOUT' ||
+        error.code === '57P03'; // NEON-specific: cannot connect now
+
+      if (isRetryableError && attempt < maxRetries) {
+        const waitTime = retryDelay * attempt; // Exponential backoff: 2s, 4s, 6s
+        console.warn(`⚠️  [DATABASE] Connection attempt ${attempt}/${maxRetries} failed (NEON cold start?)`);
+        console.warn(`   Error: ${error.message}`);
+        console.warn(`   Retrying in ${waitTime}ms...`);
+
+        // Wait before retrying
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        continue;
+      }
+
+      // Either not retryable, or we've exhausted retries
+      console.error(`❌ Database connection failed (attempt ${attempt}/${maxRetries}):`, {
+        message: error.message,
+        code: error.code,
+        stack: error.stack
+      });
+
+      if (attempt === maxRetries) {
+        console.error('❌ All connection attempts exhausted. Database unavailable.');
+        return false;
+      }
+    }
+  }
+
+  console.error('❌ Database connection failed after', maxRetries, 'attempts');
+  return false;
 }
 
 /**
