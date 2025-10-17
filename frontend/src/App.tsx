@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { isFeatureEnabled } from './config/features';
 import LandingPage from './pages/LandingPage';
 import SignUpSignInPage from './pages/SignUpSignInPage';
 import SignUpPage from './pages/SignUpPage';
@@ -118,22 +119,31 @@ function AppContent() {
 							</ProtectedRoute>
 						}
 					/>
-					<Route
-						path="/search"
-						element={
-							<ProtectedRoute>
-								<SearchPage />
-							</ProtectedRoute>
-						}
-					/>
-					<Route
-						path="/voice"
-						element={
-							<ProtectedRoute>
-								<VoiceSearchPage />
-							</ProtectedRoute>
-						}
-					/>
+
+					{/* Feature-gated routes: Search */}
+					{isFeatureEnabled('semanticSearch') && (
+						<Route
+							path="/search"
+							element={
+								<ProtectedRoute>
+									<SearchPage />
+								</ProtectedRoute>
+							}
+						/>
+					)}
+
+					{/* Feature-gated routes: Voice Search */}
+					{isFeatureEnabled('voiceSearch') && (
+						<Route
+							path="/voice"
+							element={
+								<ProtectedRoute>
+									<VoiceSearchPage />
+								</ProtectedRoute>
+							}
+						/>
+					)}
+
 					<Route
 						path="/system-status"
 						element={

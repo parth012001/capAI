@@ -11,7 +11,6 @@ import {
   AlertCircle,
   Mail,
   Volume2,
-  VolumeX,
   RefreshCw,
   Sparkles,
   Play,
@@ -20,13 +19,11 @@ import {
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { voiceService } from '../services/voiceService';
 import type { VoiceSearchResponse } from '../services/voiceService';
-import type { SearchResult } from '../services/searchService';
 
 const VoiceSearchPage: React.FC = () => {
   const {
     recordingState,
     audioBlob,
-    audioUrl,
     duration,
     error: recorderError,
     isSupported,
