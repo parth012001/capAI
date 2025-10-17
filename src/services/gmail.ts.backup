@@ -4,7 +4,6 @@ import dotenv from 'dotenv';
 import { EmailMessage, ParsedEmail } from '../types';
 import { TokenStorageService } from './tokenStorage';
 import { cleanSubjectLine, encodeEmailHeader } from '../utils/textEncoding';
-import { logger, sanitizeUserId } from '../utils/pino-logger';
 
 dotenv.config();
 
@@ -48,10 +47,11 @@ export class GmailService {
     try {
       const { tokens } = await this.oauth2Client.getToken(code);
       this.oauth2Client.setCredentials(tokens);
-
+      
+      console.log('✅ OAuth tokens set successfully');
       return tokens;
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.tokens.set.failed');
+      console.error('❌ Error setting tokens:', error);
       throw error;
     }
   }
@@ -68,10 +68,7 @@ export class GmailService {
    */
   private ensureCorrectUserContext(expectedUserId: string): void {
     if (this.currentUserId !== expectedUserId) {
-      logger.warn({
-        expected: sanitizeUserId(expectedUserId),
-        current: sanitizeUserId(this.currentUserId || 'none')
-      }, 'gmail.context.mismatch');
+      console.warn(`⚠️ Gmail service context mismatch: expected ${expectedUserId}, current ${this.currentUserId}`);
       throw new Error(`Gmail service not initialized for user ${expectedUserId}. Call initializeForUser() first.`);
     }
   }
@@ -82,6 +79,8 @@ export class GmailService {
    */
   async initializeForUser(userId: string): Promise<void> {
     try {
+      console.log(`🔑 Initializing Gmail service for user: ${userId}`);
+      
       const credentials = await this.tokenStorageService.getDecryptedCredentials(userId);
       if (!credentials) {
         throw new Error(`No tokens found for user: ${userId}`);
@@ -90,16 +89,17 @@ export class GmailService {
       // Check if access token is expired and refresh if needed
       const now = new Date();
       const expiresAt = credentials.expiresAt || new Date(0);
-
+      
       if (now >= expiresAt) {
+        console.log(`🔄 Access token expired for user ${userId}, refreshing...`);
         await this.refreshUserAccessToken(userId);
-
+        
         // Get fresh credentials after refresh
         const freshCredentials = await this.tokenStorageService.getDecryptedCredentials(userId);
         if (!freshCredentials) {
           throw new Error(`Failed to refresh tokens for user: ${userId}`);
         }
-
+        
         this.oauth2Client.setCredentials({
           access_token: freshCredentials.accessToken,
           refresh_token: freshCredentials.refreshToken
@@ -110,15 +110,12 @@ export class GmailService {
           refresh_token: credentials.refreshToken
         });
       }
-
+      
       this.currentUserId = userId;
-      logger.info({ userId: sanitizeUserId(userId), tokenExpired: now >= expiresAt }, 'gmail.service.initialized');
-
+      console.log(`✅ Gmail service initialized for user: ${userId}`);
+      
     } catch (error) {
-      logger.error({
-        userId: sanitizeUserId(userId),
-        error: error instanceof Error ? error.message : String(error)
-      }, 'gmail.service.init.failed');
+      console.error(`❌ Failed to initialize Gmail service for user ${userId}:`, error);
       throw error;
     }
   }
@@ -128,6 +125,8 @@ export class GmailService {
    */
   async refreshUserAccessToken(userId: string): Promise<void> {
     try {
+      console.log(`🔄 Refreshing access token for user: ${userId}`);
+      
       const credentials = await this.tokenStorageService.getDecryptedCredentials(userId);
       if (!credentials || !credentials.refreshToken) {
         throw new Error(`No refresh token found for user: ${userId}`);
@@ -139,7 +138,7 @@ export class GmailService {
       });
 
       const { credentials: newCredentials } = await this.oauth2Client.refreshAccessToken();
-
+      
       if (!newCredentials.access_token) {
         throw new Error('Failed to get new access token');
       }
@@ -151,21 +150,18 @@ export class GmailService {
         new Date(Date.now() + 3600 * 1000) // 1 hour from now
       );
 
-      logger.info({ userId: sanitizeUserId(userId) }, 'gmail.token.refreshed');
-
+      console.log(`✅ Access token refreshed for user: ${userId}`);
+      
     } catch (error) {
-      logger.error({
-        userId: sanitizeUserId(userId),
-        error: error instanceof Error ? error.message : String(error)
-      }, 'gmail.token.refresh.failed');
-
+      console.error(`❌ Failed to refresh access token for user ${userId}:`, error);
+      
       // If refresh fails, the user's tokens might be revoked
       // Disable webhook for this user
       await this.tokenStorageService.disableWebhookForUser(
-        userId,
+        userId, 
         'Token refresh failed - likely revoked'
       );
-
+      
       throw error;
     }
   }
@@ -198,11 +194,7 @@ export class GmailService {
 
       return emailResponse.data;
     } catch (error) {
-      logger.error({
-        messageId,
-        userId: sanitizeUserId(this.currentUserId || 'unknown'),
-        error: error instanceof Error ? error.message : String(error)
-      }, 'gmail.email.fetch.failed');
+      console.error(`❌ Error fetching email ${messageId}:`, error);
       return null;
     }
   }
@@ -217,12 +209,15 @@ export class GmailService {
       });
 
       if (!response.data.messages) {
+        console.log('No messages found');
         return [];
       }
 
+      console.log(`📧 Found ${response.data.messages.length} emails`);
+
       // Get full email content for each message
       const emails: EmailMessage[] = [];
-
+      
       for (const message of response.data.messages.slice(0, 10)) { // Limit to 10 for testing
         try {
           const emailResponse = await this.gmail.users.messages.get({
@@ -230,28 +225,16 @@ export class GmailService {
             id: message.id,
             format: 'full',
           });
-
+          
           emails.push(emailResponse.data);
         } catch (error) {
-          logger.warn({
-            messageId: message.id,
-            userId: sanitizeUserId(this.currentUserId || 'unknown')
-          }, 'gmail.email.fetch.skipped');
+          console.error(`Error fetching email ${message.id}:`, error);
         }
       }
 
-      logger.info({
-        userId: sanitizeUserId(this.currentUserId || 'unknown'),
-        emailCount: emails.length,
-        maxResults
-      }, 'gmail.emails.fetched');
-
       return emails;
     } catch (error) {
-      logger.error({
-        userId: sanitizeUserId(this.currentUserId || 'unknown'),
-        error: error instanceof Error ? error.message : String(error)
-      }, 'gmail.emails.fetch.failed');
+      console.error('❌ Error fetching emails:', error);
       throw error;
     }
   }
@@ -268,6 +251,7 @@ export class GmailService {
 
   async getSentEmails(maxResults: number = 50): Promise<EmailMessage[]> {
     try {
+      console.log(`📤 Fetching up to ${maxResults} sent emails for tone analysis...`);
       
       // Get list of sent email IDs
       const response = await this.gmail.users.messages.list({
@@ -277,9 +261,11 @@ export class GmailService {
       });
 
       if (!response.data.messages) {
+        console.log('No sent messages found');
         return [];
       }
 
+      console.log(`📤 Found ${response.data.messages.length} sent emails`);
 
       // Get full email content for each message
       const emails: EmailMessage[] = [];
@@ -296,8 +282,10 @@ export class GmailService {
         } catch (error) {
           // Handle 404 errors gracefully - these are expected in multi-user systems
           if (error && typeof error === 'object' && 'status' in error && error.status === 404) {
+            console.log(`⚠️ Email ${message.id} not accessible - skipping (cross-user access blocked)`);
           } else {
-            logger.warn({ messageId: message.id }, 'gmail.sent.fetch.skipped');
+            console.error(`❌ Error fetching sent email ${message.id}:`, 
+              error instanceof Error ? error.message : 'Unknown error');
           }
           // Continue processing other emails regardless of individual failures
           continue;
@@ -306,7 +294,7 @@ export class GmailService {
 
       return emails;
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.sent.fetch.failed');
+      console.error('❌ Error fetching sent emails:', error);
       throw error;
     }
   }
@@ -324,9 +312,12 @@ export class GmailService {
         filtered.push(email);
       } else {
         rejectedReasons[validationResult.reason] = (rejectedReasons[validationResult.reason] || 0) + 1;
+        console.log(`❌ REJECTED: "${parsed.subject.substring(0, 50)}" - Reason: ${validationResult.reason}`);
       }
     }
     
+    console.log(`🔍 Filtered ${filtered.length} emails from ${emails.length} sent emails`);
+    console.log(`📊 Rejection Breakdown:`, rejectedReasons);
     return filtered;
   }
 
@@ -511,13 +502,12 @@ export class GmailService {
     
     // Log parsing attempts for failed emails
     if (!body || body.length < 10) {
-      logger.error({
-        emailId: emailData.id,
-        subject: getHeader('Subject'),
-        from: getHeader('From'),
-        bodyLength: body.length,
-        hasSnippet: !!emailData.snippet
-      }, 'gmail.email.parse.failed');
+      console.error(`🚨 EMAIL PARSING FAILED for ${emailData.id}:`);
+      console.error(`Subject: ${getHeader('Subject')}`);
+      console.error(`From: ${getHeader('From')}`);
+      console.error(`Parsing attempts:`, parsingAttempts);
+      console.error(`Final body length: ${body.length}`);
+      console.error(`Gmail snippet: ${emailData.snippet}`);
       
       // Store failed parsing info for debugging
       (global as any).failedEmails = (global as any).failedEmails || [];
@@ -552,7 +542,8 @@ export class GmailService {
     classification: 'stranger' | 'new_contact' | 'known_contact';
   }> {
     try {
-            
+      console.log(`🔍 Discovering relationship history with ${senderEmail}...`);
+      
       // Search for all emails from/to this sender
       const searchQuery = `from:${senderEmail} OR to:${senderEmail}`;
       
@@ -600,7 +591,7 @@ export class GmailService {
           }).slice(0, 10).length;
 
         } catch (error) {
-          
+          console.warn('⚠️ Could not get message details for dates:', error);
         }
       }
 
@@ -622,11 +613,11 @@ export class GmailService {
         classification
       };
 
-      
+      console.log(`✅ Sender relationship: ${classification} (${totalEmails} total emails)`);
       return result;
 
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.sender.relationship.failed');
+      console.error('❌ Error discovering sender relationship:', error);
       return {
         totalEmails: 0,
         recentEmails: 0,
@@ -640,7 +631,8 @@ export class GmailService {
   // Get recent emails from/to specific sender for context
   async getRecentSenderEmails(senderEmail: string, maxResults: number = 5): Promise<ParsedEmail[]> {
     try {
-            
+      console.log(`📧 Fetching ${maxResults} recent emails with ${senderEmail}...`);
+      
       const searchQuery = `from:${senderEmail} OR to:${senderEmail}`;
       
       const response = await this.gmail.users.messages.list({
@@ -663,13 +655,15 @@ export class GmailService {
           const parsed = this.parseEmail(emailData.data);
           emails.push(parsed);
         } catch (error) {
-                  }
+          console.warn(`⚠️ Could not parse email ${message.id}:`, error);
+        }
       }
 
-            return emails;
+      console.log(`✅ Retrieved ${emails.length} recent emails with ${senderEmail}`);
+      return emails;
 
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.sender.emails.failed');
+      console.error('❌ Error fetching recent sender emails:', error);
       return [];
     }
   }
@@ -677,7 +671,8 @@ export class GmailService {
   // Check if email is part of existing thread and get thread context
   async getThreadEmails(threadId: string): Promise<ParsedEmail[]> {
     try {
-            
+      console.log(`🧵 Fetching thread emails for ${threadId}...`);
+      
       const response = await this.gmail.users.threads.get({
         userId: 'me',
         id: threadId,
@@ -692,13 +687,15 @@ export class GmailService {
           const parsed = this.parseEmail(message);
           emails.push(parsed);
         } catch (error) {
-                  }
+          console.warn(`⚠️ Could not parse thread message:`, error);
+        }
       }
 
-            return emails;
+      console.log(`✅ Retrieved ${emails.length} emails from thread ${threadId}`);
+      return emails;
 
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.thread.fetch.failed');
+      console.error('❌ Error fetching thread emails:', error);
       return [];
     }
   }
@@ -709,15 +706,17 @@ export class GmailService {
     try {
       // Test credentials by making a simple API call
       await this.gmail.users.getProfile({ userId: 'me' });
-          } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.credentials.invalid');
+      console.log('✅ Gmail credentials are valid');
+    } catch (error) {
+      console.error('❌ Invalid Gmail credentials:', error);
       throw new Error('Invalid or expired Gmail credentials');
     }
   }
 
   async setupWebhook(): Promise<any> {
     try {
-            
+      console.log('📡 Setting up Gmail push notifications with Pub/Sub...');
+      
       // Check if Pub/Sub topic is configured
       const pubsubTopic = process.env.GMAIL_PUBSUB_TOPIC;
       const webhookDomain = process.env.WEBHOOK_DOMAIN;
@@ -726,7 +725,9 @@ export class GmailService {
         throw new Error('Missing GMAIL_PUBSUB_TOPIC or WEBHOOK_DOMAIN environment variables');
       }
       
-                  
+      console.log(`📡 Using Pub/Sub topic: ${pubsubTopic}`);
+      console.log(`📡 Webhook endpoint: ${webhookDomain}/webhooks/gmail`);
+      
       // Set up Gmail watch with Pub/Sub topic
       const watchRequest = {
         userId: 'me',
@@ -744,27 +745,35 @@ export class GmailService {
         try {
           const expirationDate = new Date(parseInt(response.data.expiration));
           await this.tokenStorageService.updateWebhookExpiration(this.currentUserId, expirationDate);
-          logger.info({ expirationDate: expirationDate.toISOString(), userId: sanitizeUserId(this.currentUserId || 'unknown') }, 'gmail.webhook.expiration.saved');
+          console.log(`📅 Webhook expiration saved: ${expirationDate}`);
         } catch (expError) {
-          logger.warn({ error: expError instanceof Error ? expError.message : String(expError) }, 'gmail.webhook.expiration.save.failed');
+          console.warn('⚠️ Failed to save webhook expiration:', expError);
         }
       }
       
-            
+      console.log('✅ Gmail webhook setup successful with real Pub/Sub integration!');
+      console.log('📊 Watch details:', {
+        historyId: response.data.historyId,
+        expiration: response.data.expiration,
+        pubsubTopic: pubsubTopic,
+        webhookUrl: `${webhookDomain}/webhooks/gmail`
+      });
+
       return {
         ...response.data,
         pubsubTopic,
         webhookUrl: `${webhookDomain}/webhooks/gmail`
       };
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.webhook.setup.failed');
+      console.error('❌ Error setting up Gmail webhook:', error);
       throw error;
     }
   }
 
   async getWebhookStatus(): Promise<any> {
     try {
-            
+      console.log('🔍 Checking Gmail webhook status...');
+      
       // Get user profile to check watch status
       const profile = await this.gmail.users.getProfile({ userId: 'me' });
       
@@ -777,20 +786,22 @@ export class GmailService {
         note: 'Gmail API does not provide direct watch status. Use setup-webhook to establish/refresh subscription.'
       };
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.webhook.status.failed');
+      console.error('❌ Error checking webhook status:', error);
       throw error;
     }
   }
 
   async stopWebhook(): Promise<any> {
     try {
-            
+      console.log('🛑 Stopping Gmail webhook...');
+      
       // Stop Gmail watch
       const response = await this.gmail.users.stop({ userId: 'me' });
       
-            return response.data;
+      console.log('✅ Gmail webhook stopped successfully');
+      return response.data;
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.webhook.stop.failed');
+      console.error('❌ Error stopping Gmail webhook:', error);
       throw error;
     }
   }
@@ -798,7 +809,8 @@ export class GmailService {
   // Process incremental changes using historyId
   async getEmailChanges(startHistoryId: string): Promise<any[]> {
     try {
-            
+      console.log(`📊 Fetching email changes since history ID: ${startHistoryId}`);
+      
       const response = await this.gmail.users.history.list({
         userId: 'me',
         startHistoryId,
@@ -807,10 +819,11 @@ export class GmailService {
       });
 
       const changes = response.data.history || [];
-            
+      console.log(`✅ Found ${changes.length} changes since ${startHistoryId}`);
+      
       return changes;
     } catch (error) {
-      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'gmail.changes.fetch.failed');
+      console.error('❌ Error fetching email changes:', error);
       throw error;
     }
   }
@@ -838,12 +851,16 @@ export class GmailService {
 
   async sendEmail(to: string, subject: string, body: string, threadId?: string): Promise<{ messageId: string; threadId: string }> {
     try {
-                        
+      console.log(`📤 Sending email to: ${to}`);
+      console.log(`📝 Subject: ${subject}`);
+      console.log(`🧵 [THREADING DEBUG] ThreadId received: ${threadId ? threadId : 'NULL/UNDEFINED'}`);
+      
       // Create email message in RFC 2822 format
       const message = this.createEmailMessage(to, subject, body, threadId);
       
       // Send the email
-            const response = await this.gmail.users.messages.send({
+      console.log(`🧵 [THREADING DEBUG] Sending to Gmail API with threadId: ${threadId ? threadId : 'undefined'}`);
+      const response = await this.gmail.users.messages.send({
         userId: 'me',
         requestBody: {
           raw: message,
@@ -854,15 +871,11 @@ export class GmailService {
       const messageId = response.data.id;
       const responseThreadId = response.data.threadId;
 
-      logger.info({
-        userId: sanitizeUserId(this.currentUserId || 'unknown'),
-        to,
-        messageId,
-        threadId: responseThreadId,
-        hasThread: !!threadId
-      }, 'gmail.email.sent');
-
-                              
+      console.log(`✅ Email sent successfully!`);
+      console.log(`📧 Message ID: ${messageId}`);
+      console.log(`🧵 Thread ID: ${responseThreadId}`);
+      console.log(`🧵 [THREADING DEBUG] Original threadId: ${threadId ? threadId : 'undefined'} → Response threadId: ${responseThreadId}`);
+      
       return {
         messageId,
         threadId: responseThreadId
@@ -870,19 +883,19 @@ export class GmailService {
     } catch (error) {
       // Handle different types of Gmail API errors appropriately
       const status = error && typeof error === 'object' && 'status' in error ? error.status : null;
-
+      
       if (status === 404) {
-        logger.error({ status, reason: 'permission_unavailable' }, 'gmail.email.send.failed');
+        console.error('❌ Send failed: Gmail send permission not available or target not found');
         throw new Error('Gmail send permission not available - user may need to re-authenticate with send scope');
       } else if (status === 403) {
-        logger.error({ status, reason: 'insufficient_permissions' }, 'gmail.email.send.failed');
+        console.error('❌ Send failed: Insufficient permissions');
         throw new Error('Insufficient Gmail API permissions - check OAuth scopes');
       } else if (status === 429) {
-        logger.error({ status, reason: 'rate_limit' }, 'gmail.email.send.failed');
+        console.error('❌ Send failed: Rate limit exceeded');
         throw new Error('Gmail API rate limit exceeded - try again later');
       } else {
         const message = error instanceof Error ? error.message : String(error);
-        logger.error({ error: message, status }, 'gmail.email.send.failed');
+        console.error('❌ Error sending email:', message);
         throw new Error(`Failed to send email: ${message}`);
       }
     }
@@ -919,7 +932,8 @@ export class GmailService {
 
     // Add basic threading headers for maximum compatibility (keeping them minimal)
     if (threadId) {
-            // Add minimal headers to ensure threading works across all email clients
+      console.log(`🧵 [THREADING DEBUG] Using Gmail API threadId + basic headers: ${threadId}`);
+      // Add minimal headers to ensure threading works across all email clients
       // Using threadId format that's more compatible with email standards
       message += `In-Reply-To: <${threadId}.gmail@googlemail.com>\r\n`;
       message += `References: <${threadId}.gmail@googlemail.com>\r\n`;

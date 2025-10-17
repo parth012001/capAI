@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import * as dotenv from 'dotenv';
+import { logger } from '../utils/pino-logger';
 
 dotenv.config();
 
@@ -31,25 +32,17 @@ export const pool = new Pool({
 // Critical: Pool error handler to prevent server crashes
 // This catches connection drops from NEON's serverless pooler
 pool.on('error', (err: any, client) => {
-  console.error('❌ [POOL ERROR] Unexpected database pool error:', {
-    message: err.message,
-    code: err.code,
-    stack: err.stack,
-    timestamp: new Date().toISOString()
-  });
+  logger.error({
+      code: err.code,
+      error: err.message
+    }, 'database.pool.error');
   // Don't exit - let the pool handle reconnection automatically
   // pg-pool will remove the broken connection and create a new one when needed
 });
 
-// Log when new connections are created (helps with debugging)
-pool.on('connect', (client) => {
-  console.log('✅ [POOL] New database connection established');
-});
-
-// Log when connections are removed (helps track connection lifecycle)
-pool.on('remove', (client) => {
-  console.log('🔄 [POOL] Database connection removed from pool');
-});
+// Removed per-connection lifecycle logs to reduce noise in production
+// These fired constantly with Neon's connection pooling (1000s/day)
+// Connection health is monitored via pool.on('error') handler above
 
 /**
  * Execute a query with automatic retry on connection errors
@@ -79,10 +72,12 @@ export async function queryWithRetry<T = any>(
         error.message?.includes('Connection closed');
 
       if (isConnectionError && attempt < maxRetries) {
-        console.warn(`⚠️  [RETRY] Database connection error, attempt ${attempt}/${maxRetries}:`, {
-          code: error.code,
-          message: error.message
-        });
+        logger.warn({
+        attempt,
+        maxRetries,
+        code: error.code,
+        error: error.message
+      }, 'database.query.retry');
         // Wait a bit before retrying (exponential backoff)
         await new Promise(resolve => setTimeout(resolve, 100 * attempt));
         continue;
@@ -101,18 +96,18 @@ export async function testConnection(maxRetries = 3, retryDelay = 2000) {
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔌 [DATABASE] Connection attempt ${attempt}/${maxRetries}...`);
+      logger.debug({ attempt, maxRetries }, 'database.connection.attempt');
 
       const startTime = Date.now();
       const client = await pool.connect();
       const result = await client.query('SELECT NOW()');
       const connectionTime = Date.now() - startTime;
 
-      console.log(`✅ Database connected successfully in ${connectionTime}ms:`, result.rows[0].now);
+      logger.info({ connectionTime }, 'database.connected');
 
       // Warn if connection was slow (indicates cold start)
       if (connectionTime > 5000) {
-        console.warn(`⚠️  [DATABASE] Slow connection detected (${connectionTime}ms) - NEON cold start likely occurred`);
+        logger.warn({ connectionTime }, 'database.connection.slow');
       }
 
       client.release();
@@ -133,9 +128,9 @@ export async function testConnection(maxRetries = 3, retryDelay = 2000) {
 
       if (isRetryableError && attempt < maxRetries) {
         const waitTime = retryDelay * attempt; // Exponential backoff: 2s, 4s, 6s
-        console.warn(`⚠️  [DATABASE] Connection attempt ${attempt}/${maxRetries} failed (NEON cold start?)`);
-        console.warn(`   Error: ${error.message}`);
-        console.warn(`   Retrying in ${waitTime}ms...`);
+        logger.warn({ attempt, maxRetries }, 'database.connection.attempt.failed');
+        logger.warn({ error: error.message }, 'database.connection.error.detail');
+        logger.warn({ waitTime }, 'database.connection.retry.wait');
 
         // Wait before retrying
         await new Promise(resolve => setTimeout(resolve, waitTime));
@@ -143,20 +138,21 @@ export async function testConnection(maxRetries = 3, retryDelay = 2000) {
       }
 
       // Either not retryable, or we've exhausted retries
-      console.error(`❌ Database connection failed (attempt ${attempt}/${maxRetries}):`, {
-        message: error.message,
+      logger.error({
+        attempt,
+        maxRetries,
         code: error.code,
-        stack: error.stack
-      });
+        error: error.message
+      }, 'database.connection.failed');
 
       if (attempt === maxRetries) {
-        console.error('❌ All connection attempts exhausted. Database unavailable.');
+        logger.error({ maxRetries }, 'database.connection.exhausted');
         return false;
       }
     }
   }
 
-  console.error('❌ Database connection failed after', maxRetries, 'attempts');
+  logger.error({ maxRetries }, 'database.connection.failed.final');
   return false;
 }
 
@@ -167,9 +163,9 @@ export async function testConnection(maxRetries = 3, retryDelay = 2000) {
 export async function closePool(): Promise<void> {
   try {
     await pool.end();
-    console.log('✅ Database pool closed successfully');
+    logger.info({}, 'database.pool.closed');
   } catch (error) {
-    console.error('❌ Error closing database pool:', error);
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'database.pool.close.failed');
     throw error;
   }
 }
@@ -184,45 +180,45 @@ export async function initializeDatabase() {
     const completeSchemaPath = path.join(__dirname, '../../scripts/database/complete_working_schema.sql');
 
     if (fs.existsSync(completeSchemaPath)) {
-      console.log('📥 Loading complete working schema...');
+      logger.info({}, 'database.schema.loading');
       const completeSchema = fs.readFileSync(completeSchemaPath, 'utf8');
       try {
         await pool.query(completeSchema);
-        console.log('✅ Database schema initialized (Complete Working Schema - 39 tables)');
+        logger.info({ tableCount: 39 }, 'database.schema.initialized');
       } catch (error: any) {
         // Ignore "already exists" errors
         if (error.code === '42P07' || error.code === '42710' || error.code === '42P06') {
-          console.log('✅ Database schema already initialized');
+          logger.info({}, 'database.schema.already.initialized');
         } else {
           throw error;
         }
       }
 
       // Apply comprehensive constraint fixes for ALL tables
-      console.log('🔧 Applying comprehensive constraint fixes for all tables...');
+      logger.info({}, 'database.constraints.applying');
 
       const allConstraintsFixPath = path.join(__dirname, '../../scripts/database/add_all_missing_constraints.sql');
       if (fs.existsSync(allConstraintsFixPath)) {
         const allConstraintsFix = fs.readFileSync(allConstraintsFixPath, 'utf8');
         try {
           await pool.query(allConstraintsFix);
-          console.log('✅ All table constraints verified/added (10 tables fixed)');
+          logger.info({ tablesFixed: 10 }, 'database.constraints.verified');
         } catch (error: any) {
-          console.log('⚠️  Constraint fix warning:', error.message);
+          logger.warn({ error: error.message }, 'database.constraints.warning');
         }
       }
 
       // Apply timezone support migration
-      console.log('🌍 Applying timezone support migration...');
+      logger.info({}, 'database.timezone.migration.applying');
 
       const timezoneMigrationPath = path.join(__dirname, '../../scripts/database/add_timezone_support.sql');
       if (fs.existsSync(timezoneMigrationPath)) {
         const timezoneMigration = fs.readFileSync(timezoneMigrationPath, 'utf8');
         try {
           await pool.query(timezoneMigration);
-          console.log('✅ Timezone support migration applied successfully');
+          logger.info({}, 'database.timezone.migration.applied');
         } catch (error: any) {
-          console.log('⚠️  Timezone migration warning:', error.message);
+          logger.warn({ error: error.message }, 'database.timezone.migration.warning');
         }
       }
 
@@ -326,7 +322,7 @@ export async function initializeDatabase() {
       } catch (error: any) {
         if (error.code !== '42P07' && error.code !== '42710') throw error;
       }
-      console.log('✅ Database schema initialized (Phase 1-4: Full 24/7 AI Assistant)');
+      logger.info({ phase: '1-4' }, 'database.schema.initialized.phase');
     }
 
     // Initialize User Profile Schema (name collection)
@@ -363,22 +359,22 @@ export async function initializeDatabase() {
     }
 
     if (fs.existsSync(phase3_3SchemaPath)) {
-      console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 + 2.4 + 3 + 3.3 Auto-Scheduling)');
+      logger.info({ phase: '1-3.3' }, 'database.schema.initialized.phase');
     } else if (fs.existsSync(phase3CalendarSchemaPath)) {
-      console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 + 2.4 + 3 Calendar Intelligence)');
+      logger.info({ phase: '1-3' }, 'database.schema.initialized.phase');
     } else if (fs.existsSync(phase2_4SchemaPath)) {
-      console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 + 2.4 Learning System)');
+      logger.info({ phase: '1-2.4' }, 'database.schema.initialized.phase');
     } else if (fs.existsSync(phase2_3SchemaPath)) {
-      console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 + 2.3 Smart Response)');
+      logger.info({ phase: '1-2.3' }, 'database.schema.initialized.phase');
     } else if (fs.existsSync(phase2_2SchemaPath)) {
-      console.log('✅ Database schema initialized (Phase 1 + 2 + 2.2 Context Intelligence)');
+      logger.info({ phase: '1-2.2' }, 'database.schema.initialized.phase');
     } else {
-      console.log('✅ Database schema initialized (Phase 1 + 2)');
+      logger.info({ phase: '1-2' }, 'database.schema.initialized.phase');
     }
     
     return true;
   } catch (error) {
-    console.error('❌ Database initialization failed:', error);
+    logger.error({ error: error instanceof Error ? error.message : String(error) }, 'database.initialization.failed');
     return false;
   }
 }

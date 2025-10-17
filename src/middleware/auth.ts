@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { TokenStorageService } from '../services/tokenStorage';
 
+import { logger, sanitizeUserId } from '../utils/pino-logger';
 // Extend Express Request type to include user context
 declare global {
   namespace Express {
@@ -57,7 +58,7 @@ export class AuthMiddleware {
     try {
       const jwtSecret = process.env.JWT_SECRET;
       if (!jwtSecret) {
-        console.error('❌ JWT_SECRET not configured');
+        logger.error({}, 'auth.jwt.secret.missing');
         return null;
       }
 
@@ -69,11 +70,11 @@ export class AuthMiddleware {
       return payload;
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
-        console.log('🕐 JWT token expired');
+        logger.debug({}, 'auth.jwt.token.expired');
       } else if (error instanceof jwt.JsonWebTokenError) {
-        console.log('❌ Invalid JWT token');
+        logger.debug({}, 'auth.jwt.token.invalid');
       } else {
-        console.error('❌ JWT verification failed:', error);
+        logger.error({ error: error instanceof Error ? error.message : String(error), errorName: (error as any).name }, 'auth.jwt.verification.failed');
       }
       return null;
     }
@@ -117,11 +118,16 @@ export class AuthMiddleware {
       req.userId = payload.userId;
       req.userEmail = payload.email;
 
-      console.log(`🔐 Authenticated user: ${payload.email} (${payload.userId.substring(0, 8)}...)`);
+      logger.debug({
+      userId: sanitizeUserId(payload.userId),
+      email: payload.email
+    }, 'auth.user.authenticated');
       
       next();
     } catch (error) {
-      console.error('❌ Authentication middleware error:', error);
+      logger.error({
+      error: error instanceof Error ? error.message : String(error)
+    }, 'auth.middleware.error');
       return res.status(500).json({
         error: 'Authentication error',
         message: 'Internal server error during authentication'
@@ -156,7 +162,9 @@ export class AuthMiddleware {
       
       next();
     } catch (error) {
-      console.error('❌ Optional authentication error:', error);
+      logger.error({
+      error: error instanceof Error ? error.message : String(error)
+    }, 'auth.optional.error');
       // Continue without authentication on error
       next();
     }

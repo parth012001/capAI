@@ -6,6 +6,7 @@ import { LearningService } from './learning';
 import { pool } from '../database/connection';
 import { PromptTemplateService, ResponseQualityService, PromptContext, QualityScore } from './promptTemplates';
 import { UserProfileService } from './userProfile';
+import { logger, sanitizeUserId } from '../utils/pino-logger';
 
 export interface ResponseRequest {
   emailId: string;
@@ -63,8 +64,7 @@ export class ResponseService {
 
   async generateSmartResponse(request: ResponseRequest): Promise<SmartResponse> {
     try {
-      console.log(`🤖 Generating smart response for email ${request.emailId}...`);
-      
+            
       // Step 1: Gather full context
       const contextData = await this.gatherFullContext(request);
       
@@ -77,8 +77,7 @@ export class ResponseService {
           userSignature = await this.userProfileService.getUserSignature(request.userId);
           contextData.userProfile = userProfile;
           contextData.userSignature = userSignature;
-          console.log(`👤 User profile loaded: ${userProfile.firstName} ${userProfile.lastName}`);
-        }
+                  }
       }
       
       // Step 2: Detect urgency level
@@ -98,19 +97,21 @@ export class ResponseService {
       // Step 5: Save response for tracking
       await this.saveGeneratedResponse(response, request);
       
-      console.log(`✅ Smart response generated with ${response.contextUsed.length} context elements`);
-      return response;
+            return response;
       
     } catch (error) {
-      console.error('❌ Error generating smart response:', error);
+      logger.error({ 
+      emailId: request.emailId, 
+      userId: request.userId ? sanitizeUserId(request.userId) : undefined,
+      error: error instanceof Error ? error.message : String(error) 
+    }, 'response.generation.failed');
       throw error;
     }
   }
 
   private async gatherFullContext(request: ResponseRequest): Promise<any> {
     try {
-      console.log(`🎯 Starting just-in-time context gathering for ${request.recipientEmail}...`);
-
+      
       // Step 1: Determine context strategy
       const email = request.emailId ? await this.getEmailById(request.emailId) : null;
       const threadId = email?.thread_id;
@@ -120,8 +121,7 @@ export class ResponseService {
         threadId
       );
 
-      console.log(`📋 Context strategy: ${strategy.strategy} (~${strategy.processingTime}s expected)`);
-
+      
       // Step 2: Gather context using determined strategy
       const gatheredContext = await this.contextStrategyService.gatherContextByStrategy(
         strategy,
@@ -166,15 +166,14 @@ export class ResponseService {
         justInTimeContext: gatheredContext
       };
 
-      console.log(`✅ Just-in-time context gathering completed`);
-      console.log(`  - Strategy: ${strategy.strategy}`);
-      console.log(`  - Sources: ${gatheredContext.sources.join(', ')}`);
-      console.log(`  - Confidence: ${gatheredContext.confidence}%`);
-
+                        
       return contextData;
 
     } catch (error) {
-      console.error('❌ Error in just-in-time context gathering:', error);
+      logger.error({ 
+      recipientEmail: request.recipientEmail,
+      error: error instanceof Error ? error.message : String(error) 
+    }, 'response.context.gathering.failed');
       
       // Fallback to basic context
       return {
@@ -224,8 +223,7 @@ export class ResponseService {
     senderProfile: any
   ): Promise<SmartResponse> {
     
-    console.log('🎯 Using professional prompt engineering system...');
-    
+        
     const relationshipType = senderProfile?.relationship_type || 'unknown';
     const contextUsed: string[] = ['professional_prompts'];
     
@@ -241,8 +239,7 @@ export class ResponseService {
     };
     
     // Get learning patterns from Phase 2.4 LearningService (USER-SPECIFIC!)
-    console.log(`🧠 Getting learning patterns from Phase 2.4 LearningService for user ${request.userId ? request.userId.substring(0, 8) + '...' : 'anonymous'}...`);
-    const learningPatterns = await this.learningService.generateLearningInsights(14, request.userId); // Last 14 days, user-specific
+        const learningPatterns = await this.learningService.generateLearningInsights(14, request.userId); // Last 14 days, user-specific
     
     // Generate professional system prompt
     let systemPrompt = this.promptTemplateService.buildSystemPrompt(relationshipType, urgencyLevel);
@@ -251,13 +248,11 @@ export class ResponseService {
     if (contextData.userSignature) {
       systemPrompt += `\n\nSIGNATURE REQUIREMENT:\nAlways end your email response with exactly this signature:\n${contextData.userSignature}`;
       contextUsed.push('user_signature');
-      console.log(`✍️ User signature added: ${contextData.userSignature}`);
-    }
+          }
     
     // BEHAVIORAL ADAPTATION: Apply learning patterns structurally (NO TEXT DUMPING!)
     if (learningPatterns.length > 0) {
-      console.log('🎯 Applying', learningPatterns.length, 'learning patterns behaviorally');
-      systemPrompt = this.promptTemplateService.adaptPromptFromLearning(systemPrompt, learningPatterns, relationshipType);
+            systemPrompt = this.promptTemplateService.adaptPromptFromLearning(systemPrompt, learningPatterns, relationshipType);
       contextUsed.push('behavioral_learning');
     }
     
@@ -272,8 +267,7 @@ export class ResponseService {
     if (contextData.userToneProfile) contextUsed.push('user_tone');
     if (senderProfile) contextUsed.push('sender_relationship');
     
-    console.log('📝 Prompt context built:', { relationshipType, urgencyLevel, contextSources: contextUsed });
-    
+        
     // Generate the response with professional prompts
     const aiResponse = await this.aiService.openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -304,10 +298,8 @@ export class ResponseService {
       promptContext
     );
     
-    console.log('📊 Response quality score:', qualityScore.overall.toFixed(1), '%');
-    if (qualityScore.recommendations.length > 0) {
-      console.log('💡 Quality recommendations:', qualityScore.recommendations);
-    }
+        if (qualityScore.recommendations.length > 0) {
+          }
     
     return {
       id: this.generateResponseId(),
@@ -448,8 +440,7 @@ ${request.customInstructions}
 
   private async parseAndValidateJsonResponse(generatedContent: string, originalSubject: string): Promise<{ subject: string, body: string }> {
     try {
-      console.log('🔍 Parsing AI response as JSON...');
-      
+            
       // Parse JSON response
       const parsed = JSON.parse(generatedContent);
       
@@ -461,7 +452,7 @@ ${request.customInstructions}
       // Validate response content
       const validationResult = this.validateResponse(parsed);
       if (!validationResult.isValid) {
-        console.warn('⚠️ Response validation failed:', validationResult.reason);
+        logger.warn({ reason: validationResult.reason }, 'response.validation.failed');
         // Don't throw here - use the response but log the issue
       }
       
@@ -470,12 +461,10 @@ ${request.customInstructions}
         body: this.sanitizeBody(parsed.body.trim())
       };
       
-      console.log('✅ JSON response parsed successfully');
       return result;
-      
+
     } catch (error) {
-      console.error('❌ Failed to parse JSON response:', error);
-      console.log('Raw AI response:', generatedContent);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'response.parse.failed');
       
       // Fallback to text parsing for backwards compatibility
       return this.fallbackTextParsing(generatedContent, originalSubject);
@@ -548,7 +537,7 @@ ${request.customInstructions}
   }
   
   private fallbackTextParsing(generatedContent: string, originalSubject: string): { subject: string, body: string } {
-    console.log('🔄 Using fallback text parsing...');
+    logger.debug({}, 'response.parse.fallback');
     
     // Try to parse structured response if AI provided one
     const subjectMatch = generatedContent.match(/Subject:\s*(.+)/i);
@@ -579,19 +568,20 @@ ${request.customInstructions}
    */
   async recordUserEdit(responseId: string, originalResponse: string, editedResponse: string): Promise<void> {
     try {
-      console.log('📚 Recording user edit for learning system...');
-      
       // Use Phase 2.4 LearningService to analyze the edit
       const editAnalysis = await this.learningService.analyzeEdit(responseId, originalResponse, editedResponse);
-      
-      console.log(`✅ Edit analysis completed: ${editAnalysis.editType} with ${editAnalysis.successScore}% success score`);
-      console.log(`🎯 Learning insight: ${editAnalysis.learningInsight}`);
-      
+
+      logger.info({
+        responseId,
+        editType: editAnalysis.editType,
+        successScore: editAnalysis.successScore
+      }, 'response.edit.analyzed');
+
       // This will automatically update learning insights in the database via triggers
       // The next response generation will use these improved patterns
       
     } catch (error) {
-      console.error('❌ Error recording user edit for learning:', error);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'response.edit.record.failed');
     }
   }
 
@@ -602,7 +592,7 @@ ${request.customInstructions}
     try {
       return await this.learningService.calculateSuccessMetrics(days);
     } catch (error) {
-      console.error('❌ Error getting learning metrics:', error);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'response.learning.metrics.failed');
       return null;
     }
   }
@@ -615,7 +605,7 @@ ${request.customInstructions}
     try {
       // Validate that userId is provided for proper user isolation
       if (!request.userId) {
-        console.warn('⚠️ saveGeneratedResponse called without userId - this may cause user isolation issues');
+        logger.warn({ emailId: request.emailId }, 'response.save.missing_user_id');
       }
 
       const query = `
@@ -640,10 +630,13 @@ ${request.customInstructions}
         request.userId
       ]);
 
-      console.log(`✅ Generated response saved with ID ${response.id} for user ${request.userId?.substring(0, 8)}...`);
+      logger.info({
+        responseId: response.id,
+        userId: request.userId ? sanitizeUserId(request.userId) : undefined
+      }, 'response.saved');
 
     } catch (error) {
-      console.error('❌ Error saving generated response:', error);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'response.save.failed');
       // Don't throw - response generation succeeded even if saving failed
     }
   }
@@ -654,7 +647,7 @@ ${request.customInstructions}
       const result = await pool.query('SELECT * FROM emails WHERE id = $1', [emailId]);
       return result.rows[0] || null;
     } catch (error) {
-      console.error('❌ Error fetching email:', error);
+      logger.error({ emailId, error: error instanceof Error ? error.message : String(error) }, 'response.email.fetch.failed');
       return null;
     }
   }
@@ -672,7 +665,7 @@ ${request.customInstructions}
       const result = await pool.query(query, [senderEmail]);
       return result.rows;
     } catch (error) {
-      console.error('❌ Error fetching recent entities:', error);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'response.entities.fetch.failed');
       return [];
     }
   }
@@ -680,14 +673,16 @@ ${request.customInstructions}
   private async getUserToneProfile(): Promise<any> {
     try {
       const query = `
-        SELECT * FROM tone_profiles 
-        ORDER BY created_at DESC 
+        SELECT * FROM tone_profiles
+        ORDER BY created_at DESC
         LIMIT 1
       `;
       const result = await pool.query(query);
       return result.rows[0] || null;
     } catch (error) {
-      console.error('❌ Error fetching tone profile:', error);
+      logger.error({
+        error: error instanceof Error ? error.message : String(error)
+      }, 'response.tone.fetch.failed');
       return null;
     }
   }
@@ -708,7 +703,10 @@ ${request.customInstructions}
       const result = await pool.query(query, [userId]);
       return result.rows || [];
     } catch (error) {
-      console.error('❌ Error fetching learning insights:', error);
+      logger.error({
+        userId: userId ? sanitizeUserId(userId) : undefined,
+        error: error instanceof Error ? error.message : String(error)
+      }, 'response.learning.fetch.failed');
       return [];
     }
   }

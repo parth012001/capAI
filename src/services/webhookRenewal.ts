@@ -1,6 +1,7 @@
 import { TokenStorageService } from './tokenStorage';
 import { GmailService } from './gmail';
 
+import { logger, sanitizeUserId } from '../utils/pino-logger';
 export class WebhookRenewalService {
   private tokenStorageService: TokenStorageService;
   private renewalInterval: NodeJS.Timeout | null = null;
@@ -14,8 +15,8 @@ export class WebhookRenewalService {
    * Checks every 6 hours for webhooks expiring in the next 24 hours
    */
   startRenewalService(): void {
-    console.log('🔄 Starting webhook renewal service...');
-    
+        
+    logger.info({ intervalHours: 6 }, 'webhook.renewal.service.started');
     // Run immediately on startup
     this.checkAndRenewWebhooks();
     
@@ -24,8 +25,7 @@ export class WebhookRenewalService {
       this.checkAndRenewWebhooks();
     }, 6 * 60 * 60 * 1000); // 6 hours in milliseconds
     
-    console.log('✅ Webhook renewal service started (checks every 6 hours)');
-  }
+      }
 
   /**
    * Stop the renewal service
@@ -34,8 +34,7 @@ export class WebhookRenewalService {
     if (this.renewalInterval) {
       clearInterval(this.renewalInterval);
       this.renewalInterval = null;
-      console.log('🛑 Webhook renewal service stopped');
-    }
+          }
   }
 
   /**
@@ -43,16 +42,14 @@ export class WebhookRenewalService {
    */
   private async checkAndRenewWebhooks(): Promise<void> {
     try {
-      console.log('🔍 Checking for expiring webhooks...');
-      
+            
       const expiringUsers = await this.tokenStorageService.getUsersWithExpiringWebhooks();
       
       if (expiringUsers.length === 0) {
-        console.log('✅ No webhooks need renewal at this time');
-        return;
+                return;
       }
 
-      console.log(`⚠️ Found ${expiringUsers.length} webhook(s) expiring within 24 hours`);
+      logger.warn({ count: expiringUsers.length }, 'webhook.renewal.required');
 
       // Renew webhooks for each user
       for (const user of expiringUsers) {
@@ -60,7 +57,7 @@ export class WebhookRenewalService {
       }
 
     } catch (error) {
-      console.error('❌ Error in webhook renewal check:', error);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'webhook.renewal.check.failed');
     }
   }
 
@@ -69,8 +66,7 @@ export class WebhookRenewalService {
    */
   private async renewWebhookForUser(userId: string, gmailAddress: string): Promise<void> {
     try {
-      console.log(`🔄 Renewing webhook for user: ${gmailAddress}`);
-
+      
       const gmailService = new GmailService();
       
       // Initialize Gmail service for the user
@@ -79,17 +75,15 @@ export class WebhookRenewalService {
       // Setup/renew the webhook
       const watchResponse = await gmailService.setupWebhook();
       
-      console.log(`✅ Webhook renewed successfully for ${gmailAddress}:`);
-      console.log(`   - New expiration: ${new Date(parseInt(watchResponse.expiration))}`);
-      console.log(`   - History ID: ${watchResponse.historyId}`);
+      logger.info({ gmailAddress, expiresAt: new Date(parseInt(watchResponse.expiration)).toISOString(), historyId: watchResponse.historyId }, 'webhook.renewed');
 
     } catch (error) {
-      console.error(`❌ Failed to renew webhook for ${gmailAddress}:`, error);
+      logger.error({ gmailAddress, error: error instanceof Error ? error.message : String(error) }, 'webhook.renewal.failed');
       
       // If renewal fails, disable webhook to prevent continuous failures
       const errorMessage = error instanceof Error ? error.message : String(error);
       if (errorMessage.includes('invalid_grant') || errorMessage.includes('credentials')) {
-        console.warn(`🚨 Disabling webhook for ${gmailAddress} due to invalid credentials`);
+        logger.warn({ gmailAddress, reason: 'invalid_credentials' }, 'webhook.disabled');
         await this.tokenStorageService.disableWebhookForUser(userId, 'Invalid credentials');
       }
     }
@@ -99,8 +93,7 @@ export class WebhookRenewalService {
    * Manually trigger webhook renewal check (for testing/debugging)
    */
   async manualRenewalCheck(): Promise<void> {
-    console.log('🔧 Manual webhook renewal check triggered');
-    await this.checkAndRenewWebhooks();
+        await this.checkAndRenewWebhooks();
   }
 
   /**
@@ -123,7 +116,7 @@ export class WebhookRenewalService {
           : false
       }));
     } catch (error) {
-      console.error('❌ Error getting webhook status:', error);
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, 'webhook.status.failed');
       return [];
     }
   }
