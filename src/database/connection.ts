@@ -6,16 +6,26 @@ dotenv.config();
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  // NEON connection pooling configuration - PRODUCTION READY
+
+  // NEON SERVERLESS-OPTIMIZED CONNECTION POOLING (PRODUCTION READY)
   max: 100, // Maximum concurrent connections (supports 100 concurrent users)
-  min: 10, // Keep 10 connections warm for faster response times
-  idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
+  min: 0, // ✅ FIXED: No warm connections (NEON serverless closes idle connections aggressively)
+
+  // Idle timeout: Match NEON's behavior (closes after ~10-15s idle)
+  idleTimeoutMillis: 10000, // ✅ FIXED: 10 seconds (was 30s) - release idle connections fast
+
+  // Connection acquisition timeout
   connectionTimeoutMillis: 30000, // 30 seconds for NEON cold starts (serverless wake-up)
+
   // Query timeout: 30 seconds (prevents queries from hanging)
   query_timeout: 30000,
-  // Enable keep-alive to prevent NEON from dropping idle connections
+
+  // ✅ FIXED: More aggressive keep-alive to prevent NEON from closing active connections
   keepAlive: true,
-  keepAliveInitialDelayMillis: 10000, // Start sending keep-alive after 10 seconds
+  keepAliveInitialDelayMillis: 5000, // Start keep-alive after 5 seconds (was 10s)
+
+  // ✅ NEW: Allow idle connection removal without errors
+  allowExitOnIdle: false, // Don't let pool exit when all clients are idle
 });
 
 // Critical: Pool error handler to prevent server crashes

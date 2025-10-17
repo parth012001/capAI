@@ -1,4 +1,4 @@
-import { pool } from '../database/connection';
+import { pool, queryWithRetry } from '../database/connection';
 import * as crypto from 'crypto';
 
 // Encryption configuration
@@ -323,11 +323,12 @@ export class TokenStorageService {
   async getUserIdByEmail(gmailAddress: string): Promise<string | null> {
     try {
       const query = `
-        SELECT user_id FROM user_gmail_tokens 
+        SELECT user_id FROM user_gmail_tokens
         WHERE gmail_address = $1
       `;
 
-      const result = await pool.query(query, [gmailAddress.toLowerCase()]);
+      // ✅ FIXED: Use queryWithRetry to handle NEON connection drops
+      const result = await queryWithRetry(query, [gmailAddress.toLowerCase()]);
       return result.rows.length > 0 ? result.rows[0].user_id : null;
     } catch (error) {
       console.error('❌ Error getting user ID by email:', error);

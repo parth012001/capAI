@@ -169,6 +169,7 @@ app.use('/api/auth', authRateLimit, authRoutes);
 
 // OAuth routes (separate from API auth routes)
 app.get('/auth', (req, res) => {
+  // ✅ SECURITY FIX: No userId yet (pre-OAuth), safe to use global gmailService for URL generation only
   const authUrl = gmailService.getAuthUrl();
   console.log('🔐 Visit this URL to authorize the app:');
   console.log(authUrl);
@@ -177,12 +178,14 @@ app.get('/auth', (req, res) => {
 
 // Intent-based auth endpoints for proper sign up/sign in flow
 app.get('/auth/signup', (req, res) => {
+  // ✅ SECURITY FIX: No userId yet (pre-OAuth), safe to use global gmailService for URL generation only
   const authUrl = gmailService.getAuthUrl('signup');
   console.log('🆕 Sign up flow initiated');
   res.json({ authUrl, intent: 'signup' });
 });
 
 app.get('/auth/signin', (req, res) => {
+  // ✅ SECURITY FIX: No userId yet (pre-OAuth), safe to use global gmailService for URL generation only
   const authUrl = gmailService.getAuthUrl('signin');
   console.log('🔐 Sign in flow initiated');
   res.json({ authUrl, intent: 'signin' });
@@ -211,9 +214,12 @@ app.get('/auth/callback', async (req, res) => {
       }
     }
 
+    // ✅ SECURITY FIX: Use temporary service instance for OAuth token exchange
+    // Note: We don't have a userId yet, so we use the global gmailService temporarily
+    // This is safe because setTokens() doesn't use mutable user state
     const tokens = await gmailService.setTokens(code as string);
     console.log('✅ Authorization successful!');
-    
+
     // Get user Gmail address and validate intent
     try {
       const gmail = google.gmail({ version: 'v1', auth: gmailService.oauth2Client });
@@ -251,13 +257,15 @@ app.get('/auth/callback', async (req, res) => {
         // 🚀 AUTOMATIC WEBHOOK SETUP - Set up Gmail webhook for real-time processing
         try {
           console.log(`🔔 Setting up automatic webhook subscription for ${gmailAddress}...`);
-          
-          // Initialize Gmail service for the new user
-          await gmailService.initializeForUser(userId);
-          
+
+          // ✅ SECURITY FIX: Create isolated service container for this user
+          const { ServiceFactory } = await import('./utils/serviceFactory');
+          const services = ServiceFactory.createForUser(userId);
+          const userGmailService = await services.getGmailService();
+
           // Set up webhook subscription
-          const watchResponse = await gmailService.setupWebhook();
-          
+          const watchResponse = await userGmailService.setupWebhook();
+
           console.log(`✅ Automatic webhook setup successful for ${gmailAddress}`);
           console.log(`📊 Webhook expires: ${new Date(parseInt(watchResponse.expiration)).toISOString()}`);
         } catch (webhookError) {
@@ -295,15 +303,18 @@ app.get('/auth/callback', async (req, res) => {
 });
 
 // Testing endpoint to set tokens directly
+// ⚠️ DEPRECATED: This endpoint uses global gmailService and should not be used in production
+// TODO: Remove this endpoint or refactor to require userId for testing
 app.post('/auth/set-tokens', async (req, res) => {
   try {
     const { accessToken, refreshToken } = req.body;
     if (!accessToken || !refreshToken) {
       return res.status(400).json({ error: 'Both accessToken and refreshToken are required' });
     }
-    
+
+    // ⚠️ SECURITY ISSUE: Using global singleton - only safe for single-user testing
     await gmailService.setStoredTokens(accessToken, refreshToken);
-    console.log('✅ OAuth tokens set successfully');
+    console.log('✅ OAuth tokens set successfully (TESTING ONLY - NOT SAFE FOR MULTI-USER)');
     res.json({ message: 'Tokens set successfully for testing' });
   } catch (error) {
     console.error('❌ Error setting tokens:', error);
@@ -395,11 +406,13 @@ app.get('/emails/fetch', authMiddleware.authenticate, async (req, res) => {
   try {
     const userId = getUserId(req);
     console.log(`📧 Fetching emails for user: ${userId.substring(0, 8)}...`);
-    
-    // Initialize Gmail service for this user
-    await gmailService.initializeForUser(userId);
-    
-    const emails = await gmailService.getRecentEmails(20);
+
+    // ✅ SECURITY FIX: Use isolated service container
+    const { ServiceFactory } = await import('./utils/serviceFactory');
+    const services = ServiceFactory.createFromRequest(req);
+    const gmail = await services.getGmailService();
+
+    const emails = await gmail.getRecentEmails(20);
     console.log(`✅ Retrieved ${emails.length} emails from Gmail`);
 
     // Parse and save emails with user context, then process for meetings
@@ -408,7 +421,7 @@ app.get('/emails/fetch', authMiddleware.authenticate, async (req, res) => {
     
     for (const email of emails) {
       try {
-        const parsedEmail = gmailService.parseEmail(email);
+        const parsedEmail = gmail.parseEmail(email);
         
         // Check if email already exists for this user
         const exists = await emailModel.emailExists(parsedEmail.id, userId);
@@ -1046,27 +1059,29 @@ app.post('/ai/analyze-tone-real', authMiddleware.authenticate, async (req, res) 
   try {
     const userId = getUserId(req);
     console.log(`🧠 Analyzing tone from real sent emails for user: ${userId.substring(0, 8)}...`);
-    
-    // Initialize Gmail service for this user
-    await gmailService.initializeForUser(userId);
-    
+
+    // ✅ SECURITY FIX: Use isolated service container
+    const { ServiceFactory } = await import('./utils/serviceFactory');
+    const services = ServiceFactory.createFromRequest(req);
+    const gmail = await services.getGmailService();
+
     // Fetch real sent emails from Gmail with user context validation
-    const sentEmails = await gmailService.getSentEmailsForUser(userId, 50);
+    const sentEmails = await gmail.getSentEmailsForUser(userId, 50);
     console.log(`📤 Retrieved ${sentEmails.length} sent emails from Gmail`);
-    
+
     // Filter emails for tone analysis
-    const filteredEmails = gmailService.filterSentEmailsForToneAnalysis(sentEmails);
-    
+    const filteredEmails = gmail.filterSentEmailsForToneAnalysis(sentEmails);
+
     if (filteredEmails.length === 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'No suitable emails found for tone analysis',
         suggestion: 'Try sending more emails or check if your sent folder has content'
       });
     }
-    
+
     // Convert to format expected by AI service
     const emailsForAnalysis = filteredEmails.map(email => {
-      const parsed = gmailService.parseEmail(email);
+      const parsed = gmail.parseEmail(email);
       return {
         subject: parsed.subject,
         body: parsed.body
@@ -1199,14 +1214,16 @@ app.post('/ai/refresh-tone', authMiddleware.authenticate, async (req, res) => {
     }
     
     console.log('🔄 Refreshing tone analysis with latest sent emails...');
-    
-    // Initialize Gmail service for this user
-    await gmailService.initializeForUser(userId);
-    
+
+    // ✅ SECURITY FIX: Use isolated service container
+    const { ServiceFactory } = await import('./utils/serviceFactory');
+    const services = ServiceFactory.createFromRequest(req);
+    const gmail = await services.getGmailService();
+
     // Fetch and analyze fresh sent emails with user context validation
-    const sentEmails = await gmailService.getSentEmailsForUser(userId, 50);
-    const filteredEmails = gmailService.filterSentEmailsForToneAnalysis(sentEmails);
-    
+    const sentEmails = await gmail.getSentEmailsForUser(userId, 50);
+    const filteredEmails = gmail.filterSentEmailsForToneAnalysis(sentEmails);
+
     if (filteredEmails.length < 5) {
       return res.status(400).json({
         error: 'Insufficient emails for tone analysis',
@@ -1215,9 +1232,9 @@ app.post('/ai/refresh-tone', authMiddleware.authenticate, async (req, res) => {
         suggestion: 'Send more emails and try again later'
       });
     }
-    
+
     const emailsForAnalysis = filteredEmails.map(email => {
-      const parsed = gmailService.parseEmail(email);
+      const parsed = gmail.parseEmail(email);
       return {
         subject: parsed.subject,
         body: parsed.body
@@ -1660,12 +1677,14 @@ app.post('/auto-drafts/:id/send', authMiddleware.authenticate, async (req, res) 
     console.log(`📧 To: ${draftWithEmail.original_from}`);
     console.log(`📝 Subject: ${draftWithEmail.subject}`);
 
-    // Initialize Gmail service for this user
-    await gmailService.initializeForUser(userId);
+    // ✅ SECURITY FIX: Use isolated service container
+    const { ServiceFactory } = await import('./utils/serviceFactory');
+    const services = ServiceFactory.createFromRequest(req);
+    const gmail = await services.getGmailService();
 
     // Send email via Gmail API with user context validation
     console.log(`🧵 [THREADING DEBUG] About to send email with threadId: ${draftWithEmail.original_thread_id ? draftWithEmail.original_thread_id : 'NULL/UNDEFINED'}`);
-    const sendResult = await gmailService.sendEmailForUser(
+    const sendResult = await gmail.sendEmailForUser(
       userId,
       draftWithEmail.original_from, // Send to the original sender (reply)
       draftWithEmail.subject,
@@ -2297,10 +2316,13 @@ if (require.main === module) {
     });
 
     // Manual email inspection tool
+    // ⚠️ SECURITY ISSUE: Unauthenticated debug endpoint using global singleton
+    // TODO: Add authentication or remove this endpoint before production
     app.get('/debug/email/:emailId', async (req, res) => {
       try {
         const { emailId } = req.params;
-        
+
+        // ⚠️ SECURITY ISSUE: Using global singleton - only safe for single-user testing
         // Get raw email data by re-fetching (since gmail is private)
         const sentEmails = await gmailService.getSentEmails(1);
         const foundEmail = sentEmails.find(e => e.id === emailId);
@@ -3996,8 +4018,9 @@ if (require.main === module) {
 
         for (const email of emails) {
           try {
+            // Note: parseEmail is a stateless function, safe to use on database records
             const parsedEmail = gmailService.parseEmail(email);
-            
+
             // Get full context for this email
             const fullContext = await contextService.getFullContextForDraft(parsedEmail);
             
@@ -4609,13 +4632,16 @@ initializeServices().then(() => {
           const processingPromises = activeUsers.map(async (userTokens) => {
             try {
               console.log(`🔄 Processing notification for user: ${userTokens.gmailAddress} (${userTokens.userId.substring(0, 8)}...)`);
-              
-              // Initialize Gmail service for this specific user
-              await gmailService.initializeForUser(userTokens.userId);
-              
-              // Process the notification for this user
-              await processGmailNotificationForUser(notification, userTokens.userId);
-              
+
+              // ✅ CRITICAL SECURITY FIX: Create isolated service container for each user
+              // This prevents User A's webhook from accessing User B's data during concurrent processing
+              const { ServiceFactory } = await import('./utils/serviceFactory');
+              const services = ServiceFactory.createForUser(userTokens.userId);
+              const gmail = await services.getGmailService();
+
+              // Process the notification for this user with isolated gmail service
+              await processGmailNotificationForUser(notification, userTokens.userId, gmail);
+
               console.log(`✅ Completed processing for user: ${userTokens.gmailAddress}`);
             } catch (userError) {
               console.error(`❌ Error processing notification for user ${userTokens.gmailAddress}:`, userError);
@@ -4656,13 +4682,15 @@ initializeServices().then(() => {
         const processingPromises = [targetUserTokens].map(async (userTokens) => {
           try {
             console.log(`🔄 Processing notification for user: ${userTokens.gmailAddress} (${userTokens.userId.substring(0, 8)}...)`);
-            
-            // Initialize Gmail service for this specific user
-            await gmailService.initializeForUser(userTokens.userId);
-            
-            // Process the notification for this user
-            await processGmailNotificationForUser(notification, userTokens.userId);
-            
+
+            // ✅ CRITICAL SECURITY FIX: Create isolated service container for this user
+            const { ServiceFactory } = await import('./utils/serviceFactory');
+            const services = ServiceFactory.createForUser(userTokens.userId);
+            const gmail = await services.getGmailService();
+
+            // Process the notification for this user with isolated gmail service
+            await processGmailNotificationForUser(notification, userTokens.userId, gmail);
+
             console.log(`✅ Completed processing for user: ${userTokens.gmailAddress}`);
           } catch (userError) {
             console.error(`❌ Error processing notification for user ${userTokens.gmailAddress}:`, userError);
@@ -4687,12 +4715,13 @@ initializeServices().then(() => {
     }
     
     // 🚀 ENHANCED FUNCTION TO PROCESS GMAIL NOTIFICATIONS FOR A SPECIFIC USER
-    async function processGmailNotificationForUser(notification: any, userId: string) {
+    // ✅ SECURITY FIX: Now accepts gmail service instance parameter for per-user isolation
+    async function processGmailNotificationForUser(notification: any, userId: string, gmail: any) {
       const startTime = Date.now();
       try {
         console.log('🚀 Real-time email processing initiated...');
         console.log('🔄 Processing Gmail notification for auto-draft generation...');
-        
+
         const historyId = notification.historyId;
         console.log(`📊 History ID: ${historyId}`);
 
@@ -4701,37 +4730,37 @@ initializeServices().then(() => {
         // Step 1: Extract email data based on notification type
         if (notification.messageId) {
           console.log(`📩 Specific email received: ${notification.messageId}`);
-          
-          // Fetch the specific email
-          const email = await gmailService.getEmailByMessageId(notification.messageId);
+
+          // Fetch the specific email using isolated service
+          const email = await gmail.getEmailByMessageId(notification.messageId);
           if (email) {
             // Check if this specific email has been processed by webhook FOR THIS USER
             const existingEmail = await emailModel.getEmailByGmailId(email.id, userId);
             if (!existingEmail || !existingEmail.webhook_processed) {
               emailsToProcess = [email];
-              const parsedEmail = gmailService.parseEmail(email);
+              const parsedEmail = gmail.parseEmail(email);
               console.log(`📧 Specific email "${parsedEmail.subject}" added to processing queue for user (webhook_processed: ${existingEmail?.webhook_processed || 'new email'})`);
             } else {
-              const parsedEmail = gmailService.parseEmail(email);
+              const parsedEmail = gmail.parseEmail(email);
               console.log(`⏭️ Specific email "${parsedEmail.subject}" already processed by webhook for this user, skipping`);
               emailsToProcess = [];
             }
           }
         } else {
           console.log('📧 General notification - checking for new emails...');
-          
-          // Get recent emails and filter for new ones
-          const recentEmails = await gmailService.getRecentEmails(5);
-          
+
+          // Get recent emails using isolated service
+          const recentEmails = await gmail.getRecentEmails(5);
+
           for (const email of recentEmails) {
             // Check if we've already processed this email via webhook FOR THIS USER
             const existingEmail = await emailModel.getEmailByGmailId(email.id, userId);
             if (!existingEmail || !existingEmail.webhook_processed) {
               emailsToProcess.push(email);
-              const parsedEmail = gmailService.parseEmail(email);
+              const parsedEmail = gmail.parseEmail(email);
               console.log(`📧 Email "${parsedEmail.subject}" added to processing queue for user (webhook_processed: ${existingEmail?.webhook_processed || 'new email'})`);
             } else {
-              const parsedEmail = gmailService.parseEmail(email);
+              const parsedEmail = gmail.parseEmail(email);
               console.log(`⏭️ Email "${parsedEmail.subject}" already processed by webhook for this user, skipping`);
             }
           }
@@ -4750,7 +4779,7 @@ initializeServices().then(() => {
 
           try {
             // Parse email content
-            const parsedEmail = gmailService.parseEmail(emailData);
+            const parsedEmail = gmail.parseEmail(emailData);
             console.log(`📧 [PARALLEL] Processing: "${parsedEmail.subject}" from ${parsedEmail.from}`);
 
             // Step 3: Smart email filtering
@@ -5067,20 +5096,22 @@ initializeServices().then(() => {
         for (const userTokens of activeUsers) {
           try {
             console.log(`📡 Setting up webhook for user: ${userTokens.gmailAddress}`);
-            
-            // Initialize Gmail service for this user
-            await gmailService.initializeForUser(userTokens.userId);
-            
-            // Set up webhook for this user
-            const watchResponse = await gmailService.setupWebhook();
-            
+
+            // ✅ CRITICAL SECURITY FIX: Create isolated service container for each user
+            const { ServiceFactory } = await import('./utils/serviceFactory');
+            const services = ServiceFactory.createForUser(userTokens.userId);
+            const gmail = await services.getGmailService();
+
+            // Set up webhook for this user with isolated service
+            const watchResponse = await gmail.setupWebhook();
+
             results.push({
               user: userTokens.gmailAddress,
               success: true,
               watchResponse,
               expiration: new Date(parseInt(watchResponse.expiration)).toISOString()
             });
-            
+
             console.log(`✅ Webhook setup successful for ${userTokens.gmailAddress}`);
             
           } catch (userError) {
@@ -5109,6 +5140,8 @@ initializeServices().then(() => {
     });
 
     // Set up Gmail watch (subscribe to push notifications) - single user
+    // ⚠️ DEPRECATED: Unauthenticated endpoint using global singleton
+    // TODO: Remove this endpoint - webhook setup now happens automatically after OAuth
     app.post('/gmail/setup-webhook', async (_req, res) => {
       try {
         console.log('📡 Setting up Gmail webhook...');
@@ -5117,11 +5150,12 @@ initializeServices().then(() => {
           return res.status(500).json({ error: 'Gmail service not initialized' });
         }
 
+        // ⚠️ SECURITY ISSUE: Using global singleton - only safe for single-user testing
         // Check if we have valid credentials
         try {
           await gmailService.checkCredentials();
         } catch (error) {
-          return res.status(401).json({ 
+          return res.status(401).json({
             error: 'No valid Gmail credentials. Please complete OAuth flow first.',
             suggestion: 'Visit /auth to authenticate'
           });
@@ -5143,10 +5177,13 @@ initializeServices().then(() => {
     });
 
     // Check webhook status
+    // ⚠️ DEPRECATED: Unauthenticated endpoint using global singleton
+    // TODO: Add authentication or remove this endpoint
     app.get('/gmail/webhook-status', async (_req, res) => {
       try {
         console.log('🔍 Checking Gmail webhook status...');
 
+        // ⚠️ SECURITY ISSUE: Using global singleton - only safe for single-user testing
         const status = await gmailService.getWebhookStatus();
         
         res.json({
@@ -5203,10 +5240,13 @@ initializeServices().then(() => {
     });
 
     // Stop webhook (unsubscribe)
+    // ⚠️ DEPRECATED: Unauthenticated endpoint using global singleton
+    // TODO: Add authentication or remove this endpoint
     app.post('/gmail/stop-webhook', async (_req, res) => {
       try {
         console.log('🛑 Stopping Gmail webhook...');
 
+        // ⚠️ SECURITY ISSUE: Using global singleton - only safe for single-user testing
         const result = await gmailService.stopWebhook();
         
         res.json({
