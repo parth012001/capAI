@@ -122,7 +122,7 @@ export class TokenStorageService {
         tokens.expiresAt || new Date(Date.now() + 3600 * 1000), // 1 hour default
       ];
 
-      const result = await pool.query(query, values);
+      const result = await queryWithRetry(query, values);
       console.log(`✅ Tokens saved for user ID: ${userId}`);
       
       return userId;
@@ -147,8 +147,8 @@ export class TokenStorageService {
         WHERE user_id = $1 AND webhook_active = true
       `;
 
-      const result = await pool.query(query, [userId]);
-      
+      const result = await queryWithRetry(query, [userId]);
+
       if (result.rows.length === 0) {
         return null;
       }
@@ -187,8 +187,8 @@ export class TokenStorageService {
         WHERE gmail_address = $1
       `;
       
-      const result = await pool.query(query, [gmailAddress]);
-      
+      const result = await queryWithRetry(query, [gmailAddress]);
+
       if (result.rows.length === 0) {
         return null;
       }
@@ -259,7 +259,7 @@ export class TokenStorageService {
         expiresAt || new Date(Date.now() + 3600 * 1000) // 1 hour default
       ];
 
-      await pool.query(query, values);
+      await queryWithRetry(query, values);
       console.log(`✅ Access token updated for user: ${userId}`);
     } catch (error) {
       console.error('❌ Error updating access token:', error);
@@ -281,8 +281,8 @@ export class TokenStorageService {
         ORDER BY created_at ASC
       `;
 
-      const result = await pool.query(query);
-      return result.rows.map(row => ({
+      const result = await queryWithRetry(query);
+      return result.rows.map((row: any) => ({
         userId: row.user_id,
         gmailAddress: row.gmail_address,
         refreshTokenEncrypted: row.refresh_token_encrypted,
@@ -310,7 +310,7 @@ export class TokenStorageService {
         WHERE user_id = $1
       `;
 
-      await pool.query(query, [userId]);
+      await queryWithRetry(query, [userId]);
       console.log(`⚠️ Webhook disabled for user ${userId}: ${reason}`);
     } catch (error) {
       console.error('❌ Error disabling webhook:', error);
@@ -347,7 +347,7 @@ export class TokenStorageService {
         WHERE user_id = $1
       `;
 
-      await pool.query(query, [userId, expirationDate]);
+      await queryWithRetry(query, [userId, expirationDate]);
       console.log(`✅ Webhook expiration updated for user ${userId}: ${expirationDate}`);
     } catch (error) {
       console.error('❌ Error updating webhook expiration:', error);
@@ -372,8 +372,8 @@ export class TokenStorageService {
         ORDER BY webhook_expires_at ASC
       `;
 
-      const result = await pool.query(query);
-      return result.rows.map(row => ({
+      const result = await queryWithRetry(query);
+      return result.rows.map((row: any) => ({
         userId: row.user_id,
         gmailAddress: row.gmail_address,
         refreshTokenEncrypted: row.refresh_token_encrypted,
@@ -411,7 +411,7 @@ export class TokenStorageService {
         WHERE user_id = $1
       `;
 
-      await pool.query(query, [
+      await queryWithRetry(query, [
         userId,
         profileData.firstName,
         profileData.lastName,
