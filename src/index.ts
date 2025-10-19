@@ -63,10 +63,24 @@ app.use(express.json({ limit: '10mb' }));
 
 // Enable CORS for frontend (conditionally)
 if (features.enableCORS) {
+  const allowedOrigins = [
+    'http://localhost:5173', // Local development
+    'https://cap-ai-puce.vercel.app', // Original Vercel deployment
+    'https://www.getcaptainapp.com', // Production domain
+    env.FRONTEND_URL // Custom frontend URL from env
+  ].filter(Boolean); // Remove undefined/null values
+
   app.use(cors({
-    origin: env.FRONTEND_URL || (env.NODE_ENV === 'development'
-      ? 'http://localhost:5173'
-      : 'https://cap-ai-puce.vercel.app'),
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Origin ${origin} not allowed by CORS`));
+      }
+    },
     credentials: true
   }));
 }
