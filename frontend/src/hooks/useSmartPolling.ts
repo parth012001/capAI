@@ -1,66 +1,32 @@
-import { useMemo } from 'react';
-import { useWebhookStatus } from './useWebhookStatus';
 import { POLLING_CONFIG } from '../lib/constants';
 
 /**
- * Hook to determine smart polling configuration based on webhook activity
- * Returns adaptive polling intervals based on webhook health and activity
+ * Hook to provide fixed polling configuration
+ * Simplified from smart polling to use consistent intervals
+ * This reduces unnecessary webhook status polling overhead
  */
 export function useSmartPolling() {
-  const { data: webhookData } = useWebhookStatus();
-  
-  const pollingConfig = useMemo(() => {
-    if (!webhookData?.heartbeat) {
-      // No webhook data available - use idle polling
-      return {
-        refetchInterval: POLLING_CONFIG.IDLE_INTERVAL,
-        staleTime: POLLING_CONFIG.IDLE_STALE_TIME,
-        cacheTime: POLLING_CONFIG.CACHE_TIME,
-        reason: 'no-webhook-data'
-      };
-    }
-
-    const { health, timeSinceLastWebhook } = webhookData.heartbeat;
-    
-    // Determine if webhook is active based on health and timing
-    const isWebhookActive = 
-      health === 'healthy' || 
-      (health === 'warning' && timeSinceLastWebhook && timeSinceLastWebhook < POLLING_CONFIG.RECENT_WEBHOOK_THRESHOLD);
-    
-    if (isWebhookActive) {
-      // Webhook is active - poll more frequently
-      return {
-        refetchInterval: POLLING_CONFIG.ACTIVE_INTERVAL,
-        staleTime: POLLING_CONFIG.ACTIVE_STALE_TIME,
-        cacheTime: POLLING_CONFIG.CACHE_TIME,
-        reason: 'webhook-active'
-      };
-    } else {
-      // Webhook is idle - poll less frequently
-      return {
-        refetchInterval: POLLING_CONFIG.IDLE_INTERVAL,
-        staleTime: POLLING_CONFIG.IDLE_STALE_TIME,
-        cacheTime: POLLING_CONFIG.CACHE_TIME,
-        reason: 'webhook-idle'
-      };
-    }
-  }, [webhookData?.heartbeat]);
-
-  return pollingConfig;
+  // Return fixed configuration - no webhook dependency needed
+  return {
+    refetchInterval: POLLING_CONFIG.FIXED_INTERVAL,
+    staleTime: POLLING_CONFIG.FIXED_STALE_TIME,
+    cacheTime: POLLING_CONFIG.CACHE_TIME,
+    reason: 'fixed-interval'
+  };
 }
 
 /**
  * Hook to get polling status for debugging/display
+ * Simplified to return fixed status without webhook dependency
  */
 export function usePollingStatus() {
-  const { data: webhookData } = useWebhookStatus();
   const pollingConfig = useSmartPolling();
-  
+
   return {
-    isActive: pollingConfig.reason === 'webhook-active',
+    isActive: false, // No longer using "active" polling
     interval: pollingConfig.refetchInterval,
     reason: pollingConfig.reason,
-    webhookHealth: webhookData?.heartbeat?.health || 'unknown',
-    timeSinceLastWebhook: webhookData?.heartbeat?.timeSinceLastWebhook || null
+    webhookHealth: 'not-monitored', // No longer monitoring webhook health via polling
+    timeSinceLastWebhook: null
   };
 }

@@ -8,24 +8,25 @@ export const API_CONFIG = {
 } as const;
 
 /**
- * Smart Polling Configuration
- * Adaptive polling based on webhook activity
+ * Polling Configuration
+ * Fixed intervals for consistent, predictable polling behavior
+ * Reduced from adaptive polling to minimize rate limit overhead
  */
 export const POLLING_CONFIG = {
-  // Active polling when webhooks are healthy/recent
-  ACTIVE_INTERVAL: 8000, // 8 seconds - when webhooks are active
-  ACTIVE_STALE_TIME: 5000, // 5 seconds
-  
-  // Idle polling when no recent webhook activity
-  IDLE_INTERVAL: 30000, // 30 seconds - when webhooks are idle
-  IDLE_STALE_TIME: 25000, // 25 seconds
-  
+  // Fixed polling interval - consistent for all scenarios
+  FIXED_INTERVAL: 30000, // 30 seconds - stable polling rate
+  FIXED_STALE_TIME: 25000, // 25 seconds
+
   // Cache time
   CACHE_TIME: 5 * 60 * 1000, // 5 minutes
-  
-  // Webhook activity thresholds (milliseconds)
-  RECENT_WEBHOOK_THRESHOLD: 60000, // 1 minute - consider webhook "recent"
-  HEALTHY_WEBHOOK_THRESHOLD: 300000, // 5 minutes - consider webhook "healthy"
+
+  // Legacy values (kept for backwards compatibility if needed)
+  ACTIVE_INTERVAL: 8000, // 8 seconds - deprecated
+  ACTIVE_STALE_TIME: 5000, // 5 seconds - deprecated
+  IDLE_INTERVAL: 30000, // 30 seconds - deprecated
+  IDLE_STALE_TIME: 25000, // 25 seconds - deprecated
+  RECENT_WEBHOOK_THRESHOLD: 60000, // 1 minute - deprecated
+  HEALTHY_WEBHOOK_THRESHOLD: 300000, // 5 minutes - deprecated
 } as const;
 
 /**

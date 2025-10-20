@@ -54,9 +54,10 @@ class RateLimiter {
 }
 
 // Create rate limiters for different endpoints
-const generalLimiter = new RateLimiter(100, 15 * 60 * 1000); // 100 requests per 15 minutes
-const authLimiter = new RateLimiter(10, 15 * 60 * 1000);     // 10 auth requests per 15 minutes
-const apiLimiter = new RateLimiter(200, 15 * 60 * 1000);     // 200 API requests per 15 minutes
+// Increased limits to accommodate frontend polling (30s intervals = ~90 req/15min per user)
+const generalLimiter = new RateLimiter(500, 15 * 60 * 1000); // 500 requests per 15 minutes (5x buffer for multi-user)
+const authLimiter = new RateLimiter(10, 15 * 60 * 1000);     // 10 auth requests per 15 minutes (keep strict)
+const apiLimiter = new RateLimiter(800, 15 * 60 * 1000);     // 800 API requests per 15 minutes (increased for read operations)
 
 // Cleanup old entries every 5 minutes
 let rateLimiterCleanupInterval: NodeJS.Timeout | null = setInterval(() => {
@@ -66,7 +67,43 @@ let rateLimiterCleanupInterval: NodeJS.Timeout | null = setInterval(() => {
 }, 5 * 60 * 1000);
 
 /**
+ * Get client identifier for rate limiting
+ * Extracts user ID from JWT token if present, falls back to IP address
+ */
+function getClientId(req: Request): string {
+  // Try to extract userId from Authorization header (JWT token)
+  // This happens BEFORE authMiddleware.authenticate runs
+  const authHeader = req.headers.authorization;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    try {
+      const token = authHeader.substring(7); // Remove 'Bearer ' prefix
+      // Decode JWT without verification (just to get the userId for rate limiting)
+      // Full verification happens later in authMiddleware.authenticate
+      const base64Payload = token.split('.')[1];
+      if (base64Payload) {
+        const payload = JSON.parse(Buffer.from(base64Payload, 'base64').toString());
+        if (payload.userId) {
+          // Use userId from token - each user gets their own rate limit bucket
+          return `user:${payload.userId}`;
+        }
+      }
+    } catch (error) {
+      // If token decoding fails, fall through to IP-based limiting
+      // The proper auth middleware will handle the invalid token
+    }
+  }
+
+  // Fall back to IP address for:
+  // 1. Unauthenticated requests (auth endpoints, webhooks, etc.)
+  // 2. Invalid/malformed JWT tokens
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  return `ip:${ip}`;
+}
+
+/**
  * Rate limiting middleware
+ * Uses per-user limits for authenticated requests, per-IP for unauthenticated
  */
 export function rateLimit(limiter: RateLimiter = generalLimiter) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -74,15 +111,15 @@ export function rateLimit(limiter: RateLimiter = generalLimiter) {
       return next(); // Skip in development
     }
 
-    const clientId = req.ip || req.socket.remoteAddress || 'unknown';
-    
+    const clientId = getClientId(req);
+
     if (!limiter.isAllowed(clientId)) {
-      logger.warn(`Rate limit exceeded`, { 
-        clientId, 
+      logger.warn(`Rate limit exceeded`, {
+        clientId,
         endpoint: req.path,
         userAgent: req.get('User-Agent')
       });
-      
+
       return res.status(429).json({
         error: 'Too Many Requests',
         message: 'Rate limit exceeded. Please try again later.',
