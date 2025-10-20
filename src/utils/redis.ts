@@ -31,7 +31,12 @@ class RedisClient {
       this.client = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
         retryStrategy(times) {
-          // Stop retrying after 3 attempts
+          // In production without Redis, don't keep retrying
+          // Just fail once and continue without Redis
+          if (env.NODE_ENV === 'production' && times > 1) {
+            return null; // Stop retrying
+          }
+          // Development: try a few times
           if (times > 3) {
             return null;
           }
@@ -39,6 +44,7 @@ class RedisClient {
           return 1000;
         },
         lazyConnect: true, // Don't connect immediately
+        enableOfflineQueue: false, // Don't queue commands when disconnected
       });
 
       // Handle connection events
@@ -53,7 +59,8 @@ class RedisClient {
         if (env.NODE_ENV === 'development') {
           logger.warn('⚠️  [REDIS] Not available (optional in development):', err.message);
         } else {
-          logger.error('❌ [REDIS] Connection error (required in production):', err);
+          // Downgrade to warning - system works without Redis (webhook deduplication disabled)
+          logger.warn('⚠️  [REDIS] Not available - webhook deduplication disabled:', err.message);
         }
       });
 
@@ -69,7 +76,8 @@ class RedisClient {
           logger.warn('⚠️  [REDIS] Not available - continuing without Redis (webhook locks disabled)');
           logger.warn('   To enable Redis: Install Redis locally or set REDIS_URL environment variable');
         } else {
-          logger.error('❌ [REDIS] Failed to connect (production requires Redis):', err);
+          // Downgrade to warning - system continues to work without Redis
+          logger.warn('⚠️  [REDIS] Not available - webhook deduplication disabled (add Redis to enable)');
         }
       });
 
