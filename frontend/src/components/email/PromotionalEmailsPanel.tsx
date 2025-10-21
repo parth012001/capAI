@@ -95,8 +95,8 @@ export function PromotionalEmailsPanel() {
   const emails = data?.emails || [];
 
   return (
-    <Card className="h-full flex flex-col overflow-hidden">
-      <CardHeader className="flex-shrink-0">
+    <Card className="h-full">
+      <CardHeader>
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="flex items-center space-x-2">
@@ -216,7 +216,7 @@ export function PromotionalEmailsPanel() {
         )}
       </CardHeader>
       
-      <CardContent className="flex-1 overflow-hidden">
+      <CardContent className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 24rem)' }}>
         {emails.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center">
@@ -225,7 +225,7 @@ export function PromotionalEmailsPanel() {
                 {getFilterSummary() !== 'All emails' ? 'No emails match your filters' : 'No promotional emails'}
               </h3>
               <p className="text-slate-500 mb-4">
-                {getFilterSummary() !== 'All emails' 
+                {getFilterSummary() !== 'All emails'
                   ? 'Try adjusting your filters to see more emails'
                   : 'Promotional emails will appear here when received'
                 }
@@ -238,11 +238,11 @@ export function PromotionalEmailsPanel() {
             </div>
           </div>
         ) : (
-          <div className="space-y-3 h-full overflow-y-auto pr-2">
+          <div className="space-y-3 pr-2">
             {emails.map((email) => (
               <PromotionalEmailCard key={email.id} email={email} />
             ))}
-            
+
             {/* Load More Button */}
             {emails.length >= (filters.limit || 20) && (
               <div className="flex justify-center pt-4">
