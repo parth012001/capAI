@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { motion } from 'framer-motion';
+import { AlertCircle, CheckCircle } from 'lucide-react';
 import './AuthCallback.css';
 
 export default function AuthCallback() {
   const [status, setStatus] = useState<'processing' | 'success' | 'error'>('processing');
   const [message, setMessage] = useState('Processing your authentication...');
+  const [errorType, setErrorType] = useState<string | null>(null);
   const auth = useAuth();
 
   useEffect(() => {
@@ -19,18 +22,20 @@ export default function AuthCallback() {
 
         if (error) {
           setStatus('error');
+          setErrorType(error);
+
           if (error === 'no_code') {
-            setMessage('No authorization code received. Please try signing in again.');
+            setMessage('No authorization code received from Google.');
           } else if (error === 'auth_failed') {
-            setMessage('Authentication failed. Please try again.');
+            setMessage('We couldn\'t complete your authentication. This might be a temporary issue.');
           } else if (error === 'user_not_found') {
             const email = urlParams.get('email');
-            setMessage(`Account not found for ${email}. Please sign up first or check your email address.`);
+            setMessage(`We couldn't find an account associated with ${email}.`);
           } else if (error === 'user_exists') {
             const email = urlParams.get('email');
-            setMessage(`Account already exists for ${email}. Please sign in instead.`);
+            setMessage(`An account with ${email} already exists.`);
           } else {
-            setMessage('Authentication was cancelled or failed.');
+            setMessage('Authentication was cancelled or encountered an error.');
           }
           return;
         }
@@ -74,43 +79,177 @@ export default function AuthCallback() {
     handleCallback();
   }, [auth]);
 
-  const handleRetry = () => {
-    console.info('[Route] AuthCallback retry -> /signin');
-    window.location.href = '/signin';
+  const handleAction = () => {
+    if (errorType === 'user_exists') {
+      console.info('[Route] AuthCallback: redirecting to sign in');
+      window.location.href = '/signin';
+    } else if (errorType === 'user_not_found') {
+      console.info('[Route] AuthCallback: redirecting to sign up');
+      window.location.href = '/signup';
+    } else {
+      console.info('[Route] AuthCallback: retry -> /signin');
+      window.location.href = '/signin';
+    }
+  };
+
+  const getActionButtonText = () => {
+    if (errorType === 'user_exists') return 'Go to Sign In';
+    if (errorType === 'user_not_found') return 'Go to Sign Up';
+    return 'Return to Sign In';
   };
 
   return (
-    <div className="callback-container">
-      <div className="callback-card">
-        <div className="callback-content">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Animated gradient orbs - matching SignIn page */}
+      <motion.div
+        className="absolute top-1/4 -left-20 w-96 h-96 bg-gradient-to-r from-blue-400 to-blue-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30"
+        animate={{
+          scale: [1, 1.2, 1],
+          x: [0, 50, 0],
+          y: [0, 30, 0]
+        }}
+        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="absolute bottom-1/4 -right-20 w-96 h-96 bg-gradient-to-r from-purple-400 to-pink-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30"
+        animate={{
+          scale: [1, 1.3, 1],
+          x: [0, -50, 0],
+          y: [0, -30, 0]
+        }}
+        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+      />
+
+      {/* Main Card */}
+      <motion.div
+        className="relative z-10 bg-white/90 backdrop-blur-xl border border-blue-200/50 rounded-3xl shadow-2xl max-w-lg w-full p-10"
+        initial={{ opacity: 0, y: 20, scale: 0.95 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" }}
+      >
+        <div className="text-center">
           {status === 'processing' && (
             <>
-              <div className="loading-spinner large"></div>
-              <h2>Setting up your Chief AI account...</h2>
-              <p>{message}</p>
+              {/* Logo */}
+              <motion.div
+                className="w-20 h-20 bg-gradient-to-br from-blue-100 via-purple-100 to-pink-100 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg border-2 border-blue-200/50"
+                animate={{ rotate: [0, 360] }}
+                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+              >
+                <img src="/Logo.png" alt="Captain AI" className="w-12 h-12 object-contain" />
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <h2 className="text-3xl font-bold text-slate-900 mb-4">
+                  Setting up your account
+                </h2>
+                <p className="text-slate-600 mb-8">{message}</p>
+                <motion.div
+                  className="w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full mx-auto"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                />
+              </motion.div>
             </>
           )}
 
           {status === 'success' && (
             <>
-              <div className="success-icon">✅</div>
-              <h2>Authentication Successful!</h2>
-              <p>{message}</p>
+              <motion.div
+                className="w-20 h-20 bg-gradient-to-br from-green-100 to-green-200 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg border-2 border-green-300"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", stiffness: 200, damping: 10 }}
+              >
+                <CheckCircle className="w-12 h-12 text-green-600" />
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+              >
+                <h2 className="text-3xl font-bold text-slate-900 mb-4">
+                  Welcome to Captain AI!
+                </h2>
+                <p className="text-slate-600">{message}</p>
+              </motion.div>
             </>
           )}
 
           {status === 'error' && (
             <>
-              <div className="error-icon">❌</div>
-              <h2>Authentication Failed</h2>
-              <p>{message}</p>
-              <button onClick={handleRetry} className="retry-btn">
-                Try Again
-              </button>
+              <motion.div
+                className="w-20 h-20 bg-gradient-to-br from-red-100 to-red-200 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg border-2 border-red-300"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: "spring", stiffness: 200, damping: 10 }}
+              >
+                <AlertCircle className="w-12 h-12 text-red-600" />
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="mb-8"
+              >
+                <h2 className="text-3xl font-bold text-slate-900 mb-4">
+                  {errorType === 'user_exists' ? 'Account Already Exists' :
+                   errorType === 'user_not_found' ? 'Account Not Found' :
+                   'Authentication Error'}
+                </h2>
+                <p className="text-slate-600 leading-relaxed">{message}</p>
+              </motion.div>
+
+              {/* Informational box for specific errors */}
+              {(errorType === 'user_exists' || errorType === 'user_not_found') && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="mb-8 bg-gradient-to-br from-blue-50 to-purple-50 rounded-2xl p-6 border border-blue-100 text-left"
+                >
+                  <h3 className="text-sm font-bold text-slate-900 mb-3">
+                    {errorType === 'user_exists' ? 'What to do next:' : 'Need help?'}
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    {errorType === 'user_exists'
+                      ? 'You already have a Captain AI account with this email address. Click the button below to sign in to your existing account.'
+                      : 'This email address hasn\'t been registered yet. Click the button below to create a new Captain AI account.'}
+                  </p>
+                </motion.div>
+              )}
+
+              <motion.button
+                onClick={handleAction}
+                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-5 px-6 rounded-xl transition-all duration-300 shadow-xl hover:shadow-[0_20px_50px_rgba(59,130,246,0.5)] flex items-center justify-center gap-3 group hover:from-blue-700 hover:to-purple-700"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.4 }}
+              >
+                <span className="group-hover:translate-x-1 transition-transform">
+                  {getActionButtonText()}
+                </span>
+                <svg
+                  className="w-5 h-5 group-hover:translate-x-1 transition-transform"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </motion.button>
             </>
           )}
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }
