@@ -11,7 +11,6 @@ import { env, features, initializeEnvironment } from './config/environment';
 // Initialize environment configuration after dotenv is loaded
 initializeEnvironment();
 import { logger } from './utils/logger';
-import { logger as pinoLogger, sanitizeUserId } from './utils/pino-logger';
 import { monitoring, monitoringMiddleware } from './utils/monitoring';
 import { redis } from './utils/redis';
 import {
@@ -4304,15 +4303,10 @@ initializeServices().then(() => {
         // Update heartbeat tracking
         webhookHeartbeat.lastReceived = new Date();
         webhookHeartbeat.totalReceived++;
-
-        pinoLogger.info({
-          totalReceived: webhookHeartbeat.totalReceived
-        }, 'webhook.gmail.received');
-
-        pinoLogger.debug({
-          headers: req.headers,
-          body: req.body
-        }, 'webhook.gmail.raw_data');
+        
+        console.log('📧 Received Gmail webhook notification');
+        console.log('Headers:', JSON.stringify(req.headers, null, 2));
+        console.log('Body:', JSON.stringify(req.body, null, 2));
 
         // Acknowledge receipt immediately (Google requires < 10 second response)
         res.status(200).send('OK');
@@ -4320,14 +4314,11 @@ initializeServices().then(() => {
         // Decode the Pub/Sub message
         if (req.body.message && req.body.message.data) {
           const messageData = Buffer.from(req.body.message.data, 'base64').toString();
-          pinoLogger.debug({ messageData }, 'webhook.gmail.decoded');
-
+          console.log('📨 Decoded message:', messageData);
+          
           try {
             const notification = JSON.parse(messageData);
-            pinoLogger.info({
-              historyId: notification.historyId,
-              emailAddress: notification.emailAddress
-            }, 'webhook.gmail.notification_parsed');
+            console.log('🎯 Gmail notification:', notification);
 
             // PRODUCTION: Idempotency check to prevent duplicate processing
             // Use historyId as unique identifier for this webhook event
@@ -4335,44 +4326,34 @@ initializeServices().then(() => {
             const lockAcquired = await redis.acquireLock(lockKey, 300); // 5 min TTL
 
             if (!lockAcquired) {
-              pinoLogger.warn({ historyId: notification.historyId }, 'webhook.gmail.duplicate_skipped');
+              console.log('⏭️  [WEBHOOK] Skipping duplicate - already processing this historyId');
               return;
             }
 
-            pinoLogger.debug({ historyId: notification.historyId }, 'webhook.gmail.lock_acquired');
+            console.log('🔒 [WEBHOOK] Lock acquired - processing notification');
 
             // Process the notification asynchronously FOR ALL ACTIVE USERS
             processGmailNotificationMultiUser(notification).then(() => {
               // Update processing heartbeat
               webhookHeartbeat.lastProcessed = new Date();
               webhookHeartbeat.totalProcessed++;
-              pinoLogger.info({
-                historyId: notification.historyId,
-                totalProcessed: webhookHeartbeat.totalProcessed
-              }, 'webhook.gmail.processing_complete');
+              console.log('✅ [WEBHOOK] Processing complete');
 
               // Keep lock for 5 minutes to prevent reprocessing
               // Lock will auto-expire after TTL
             }).catch(error => {
-              pinoLogger.error({
-                historyId: notification.historyId,
-                error: error instanceof Error ? error.message : String(error)
-              }, 'webhook.gmail.processing_failed');
+              console.error('❌ Error processing Gmail notification:', error);
               // Release lock on error to allow retry
               redis.releaseLock(lockKey);
             });
           } catch (parseError) {
-            pinoLogger.error({
-              error: parseError instanceof Error ? parseError.message : String(parseError),
-              messageData
-            }, 'webhook.gmail.parse_error');
+            console.error('❌ Error parsing Gmail webhook message:', parseError);
+            console.log('📨 Invalid message data:', messageData);
           }
         }
 
       } catch (error) {
-        pinoLogger.error({
-          error: error instanceof Error ? error.message : String(error)
-        }, 'webhook.gmail.handler_error');
+        console.error('❌ Error handling Gmail webhook:', error);
         // Response already sent on line 2704, don't send again
       }
     });
@@ -4645,29 +4626,26 @@ initializeServices().then(() => {
     // 🚀 MULTI-USER WEBHOOK PROCESSING - Processes emails for the specific user in notification
     async function processGmailNotificationMultiUser(notification: any) {
       try {
-        pinoLogger.debug({ emailAddress: notification.emailAddress }, 'webhook.multiuser.start');
-
+        console.log('🌍 Processing Gmail notification for target user...');
+        
         // Extract target email from notification
         const targetEmail = notification.emailAddress;
         if (!targetEmail) {
-          pinoLogger.warn('webhook.multiuser.no_target_fallback_all');
-
+          console.log('⚠️ No emailAddress found in notification. Processing for all active users as fallback.');
+          
           // Fallback: Get all users with active webhooks
           const activeUsers = await tokenStorageService.getActiveWebhookUsers();
-          pinoLogger.info({ activeUserCount: activeUsers.length }, 'webhook.multiuser.active_users');
-
+          console.log(`👥 Found ${activeUsers.length} active users with webhook subscriptions`);
+          
           if (activeUsers.length === 0) {
-            pinoLogger.warn('webhook.multiuser.no_active_users');
+            console.log('⚠️ No active webhook users found. Skipping processing.');
             return;
           }
-
+          
           // Process notification for each active user
           const processingPromises = activeUsers.map(async (userTokens) => {
             try {
-              pinoLogger.debug({
-                userId: sanitizeUserId(userTokens.userId),
-                gmailAddress: userTokens.gmailAddress
-              }, 'webhook.user.processing_start');
+              console.log(`🔄 Processing notification for user: ${userTokens.gmailAddress} (${userTokens.userId.substring(0, 8)}...)`);
 
               // ✅ CRITICAL SECURITY FIX: Create isolated service container for each user
               // This prevents User A's webhook from accessing User B's data during concurrent processing
@@ -4678,65 +4656,46 @@ initializeServices().then(() => {
               // Process the notification for this user with isolated gmail service
               await processGmailNotificationForUser(notification, userTokens.userId, gmail);
 
-              pinoLogger.info({
-                userId: sanitizeUserId(userTokens.userId),
-                gmailAddress: userTokens.gmailAddress
-              }, 'webhook.user.processing_complete');
+              console.log(`✅ Completed processing for user: ${userTokens.gmailAddress}`);
             } catch (userError) {
-              pinoLogger.error({
-                userId: sanitizeUserId(userTokens.userId),
-                gmailAddress: userTokens.gmailAddress,
-                error: userError instanceof Error ? userError.message : String(userError)
-              }, 'webhook.user.processing_failed');
-
+              console.error(`❌ Error processing notification for user ${userTokens.gmailAddress}:`, userError);
+              
               // If the error is auth-related, disable webhook for this user
               const errorMessage = userError instanceof Error ? userError.message : String(userError);
               if (errorMessage?.includes('invalid_grant') || errorMessage?.includes('unauthorized')) {
-                pinoLogger.warn({
-                  userId: sanitizeUserId(userTokens.userId),
-                  gmailAddress: userTokens.gmailAddress
-                }, 'webhook.user.auth_failed_disabling');
+                console.log(`⚠️ Disabling webhook for user ${userTokens.gmailAddress} due to auth issues`);
                 await tokenStorageService.disableWebhookForUser(userTokens.userId, 'Authentication failed during webhook processing');
               }
             }
           });
-
+          
           // Wait for all user processing to complete
           await Promise.allSettled(processingPromises);
           return;
         }
-
-        pinoLogger.info({ targetEmail }, 'webhook.multiuser.specific_target');
-
+        
+        console.log(`🎯 Processing notification for specific user: ${targetEmail}`);
+        
         // Find the specific user ID for this notification
         const targetUserId = await tokenStorageService.getUserIdByEmail(targetEmail);
         if (!targetUserId) {
-          pinoLogger.warn({ targetEmail }, 'webhook.multiuser.user_not_found');
+          console.log(`⚠️ Target user ${targetEmail} not found. Skipping processing.`);
           return;
         }
-
+        
         // Get the user's tokens to check if webhook is active
         const targetUserTokens = await tokenStorageService.getUserTokens(targetUserId);
         if (!targetUserTokens || !targetUserTokens.webhookActive) {
-          pinoLogger.warn({
-            targetEmail,
-            userId: sanitizeUserId(targetUserId)
-          }, 'webhook.multiuser.webhook_not_active');
+          console.log(`⚠️ Target user ${targetEmail} webhook not active. Skipping processing.`);
           return;
         }
-
-        pinoLogger.debug({
-          userId: sanitizeUserId(targetUserId),
-          gmailAddress: targetUserTokens.gmailAddress
-        }, 'webhook.multiuser.target_found');
-
+        
+        console.log(`👤 Found target user: ${targetUserTokens.gmailAddress} (${targetUserId.substring(0, 8)}...)`);
+        
         // Process notification for the specific user only
         const processingPromises = [targetUserTokens].map(async (userTokens) => {
           try {
-            pinoLogger.debug({
-              userId: sanitizeUserId(userTokens.userId),
-              gmailAddress: userTokens.gmailAddress
-            }, 'webhook.user.processing_start');
+            console.log(`🔄 Processing notification for user: ${userTokens.gmailAddress} (${userTokens.userId.substring(0, 8)}...)`);
 
             // ✅ CRITICAL SECURITY FIX: Create isolated service container for this user
             const { ServiceFactory } = await import('./utils/serviceFactory');
@@ -4746,38 +4705,26 @@ initializeServices().then(() => {
             // Process the notification for this user with isolated gmail service
             await processGmailNotificationForUser(notification, userTokens.userId, gmail);
 
-            pinoLogger.info({
-              userId: sanitizeUserId(userTokens.userId),
-              gmailAddress: userTokens.gmailAddress
-            }, 'webhook.user.processing_complete');
+            console.log(`✅ Completed processing for user: ${userTokens.gmailAddress}`);
           } catch (userError) {
-            pinoLogger.error({
-              userId: sanitizeUserId(userTokens.userId),
-              gmailAddress: userTokens.gmailAddress,
-              error: userError instanceof Error ? userError.message : String(userError)
-            }, 'webhook.user.processing_failed');
-
+            console.error(`❌ Error processing notification for user ${userTokens.gmailAddress}:`, userError);
+            
             // If the error is auth-related, disable webhook for this user
             const errorMessage = userError instanceof Error ? userError.message : String(userError);
             if (errorMessage?.includes('invalid_grant') || errorMessage?.includes('unauthorized')) {
-              pinoLogger.warn({
-                userId: sanitizeUserId(userTokens.userId),
-                gmailAddress: userTokens.gmailAddress
-              }, 'webhook.user.auth_failed_disabling');
+              console.log(`⚠️ Disabling webhook for user ${userTokens.gmailAddress} due to auth issues`);
               await tokenStorageService.disableWebhookForUser(userTokens.userId, 'Authentication failed during webhook processing');
             }
           }
         });
-
+        
         // Wait for all user processing to complete
         await Promise.allSettled(processingPromises);
-
-        pinoLogger.info('webhook.multiuser.complete');
-
+        
+        console.log('🎉 Multi-user webhook processing completed for all active users');
+        
       } catch (error) {
-        pinoLogger.error({
-          error: error instanceof Error ? error.message : String(error)
-        }, 'webhook.multiuser.critical_error');
+        console.error('❌ Critical error in multi-user webhook processing:', error);
       }
     }
     
@@ -4786,19 +4733,17 @@ initializeServices().then(() => {
     async function processGmailNotificationForUser(notification: any, userId: string, gmail: any) {
       const startTime = Date.now();
       try {
-        pinoLogger.info({
-          userId: sanitizeUserId(userId),
-          historyId: notification.historyId
-        }, 'webhook.email.processing_start');
+        console.log('🚀 Real-time email processing initiated...');
+        console.log('🔄 Processing Gmail notification for auto-draft generation...');
 
         const historyId = notification.historyId;
-        pinoLogger.debug({ historyId }, 'webhook.email.history_id');
+        console.log(`📊 History ID: ${historyId}`);
 
         let emailsToProcess: any[] = [];
 
         // Step 1: Extract email data based on notification type
         if (notification.messageId) {
-          pinoLogger.debug({ messageId: notification.messageId }, 'webhook.email.specific_received');
+          console.log(`📩 Specific email received: ${notification.messageId}`);
 
           // Fetch the specific email using isolated service
           const email = await gmail.getEmailByMessageId(notification.messageId);
@@ -4808,18 +4753,15 @@ initializeServices().then(() => {
             if (!existingEmail || !existingEmail.webhook_processed) {
               emailsToProcess = [email];
               const parsedEmail = gmail.parseEmail(email);
-              pinoLogger.debug({
-                subject: parsedEmail.subject,
-                webhookProcessed: existingEmail?.webhook_processed || 'new'
-              }, 'webhook.email.queue_added');
+              console.log(`📧 Specific email "${parsedEmail.subject}" added to processing queue for user (webhook_processed: ${existingEmail?.webhook_processed || 'new email'})`);
             } else {
               const parsedEmail = gmail.parseEmail(email);
-              pinoLogger.debug({ subject: parsedEmail.subject }, 'webhook.email.already_processed');
+              console.log(`⏭️ Specific email "${parsedEmail.subject}" already processed by webhook for this user, skipping`);
               emailsToProcess = [];
             }
           }
         } else {
-          pinoLogger.debug('webhook.email.checking_recent');
+          console.log('📧 General notification - checking for new emails...');
 
           // Get recent emails using isolated service
           const recentEmails = await gmail.getRecentEmails(5);
@@ -4830,21 +4772,15 @@ initializeServices().then(() => {
             if (!existingEmail || !existingEmail.webhook_processed) {
               emailsToProcess.push(email);
               const parsedEmail = gmail.parseEmail(email);
-              pinoLogger.debug({
-                subject: parsedEmail.subject,
-                webhookProcessed: existingEmail?.webhook_processed || 'new'
-              }, 'webhook.email.queue_added');
+              console.log(`📧 Email "${parsedEmail.subject}" added to processing queue for user (webhook_processed: ${existingEmail?.webhook_processed || 'new email'})`);
             } else {
               const parsedEmail = gmail.parseEmail(email);
-              pinoLogger.debug({ subject: parsedEmail.subject }, 'webhook.email.already_processed_skip');
+              console.log(`⏭️ Email "${parsedEmail.subject}" already processed by webhook for this user, skipping`);
             }
           }
         }
 
-        pinoLogger.info({
-          emailCount: emailsToProcess.length,
-          userId: sanitizeUserId(userId)
-        }, 'webhook.email.found_to_process');
+        console.log(`📬 Found ${emailsToProcess.length} new emails to process`);
 
         // NEW: Extract email processing into separate function for parallel processing
         async function processEmailSafe(emailData: any): Promise<{
@@ -4858,24 +4794,19 @@ initializeServices().then(() => {
           try {
             // Parse email content
             const parsedEmail = gmail.parseEmail(emailData);
-            pinoLogger.debug({
-              subject: parsedEmail.subject,
-              from: parsedEmail.from,
-              userId: sanitizeUserId(userId)
-            }, 'webhook.email.parallel.processing');
+            console.log(`📧 [PARALLEL] Processing: "${parsedEmail.subject}" from ${parsedEmail.from}`);
 
             // Step 3: Smart email filtering
             const shouldGenerateResponse = await shouldGenerateResponseForEmail(parsedEmail, userId);
             if (!shouldGenerateResponse.generate) {
-              pinoLogger.debug({
-                subject: parsedEmail.subject,
-                reason: shouldGenerateResponse.reason
-              }, 'webhook.email.parallel.skipped');
+              console.log(`⏭️ [PARALLEL] Skipping email: ${shouldGenerateResponse.reason}`);
 
               // Atomically save email and mark as webhook processed FOR THIS USER (even though no draft was generated)
               const result = await emailModel.saveEmailAndMarkAsWebhookProcessedForUser(parsedEmail, userId);
               if (result.success) {
-                pinoLogger.debug({ emailId: result.emailId }, 'webhook.email.parallel.marked_filtered');
+                console.log(`🏷️ [PARALLEL] Email ID ${result.emailId} marked as webhook_processed = true for user (filtered out)`);
+              } else {
+                console.log(`⏭️ [PARALLEL] Email already processed by webhook for this user, skipping (filtered out)`);
               }
               return {
                 status: 'skipped',
@@ -4885,15 +4816,12 @@ initializeServices().then(() => {
               };
             }
 
-            pinoLogger.debug({
-              subject: parsedEmail.subject,
-              reason: shouldGenerateResponse.reason
-            }, 'webhook.email.parallel.qualifies');
+            console.log(`✅ [PARALLEL] Email qualifies for response generation: ${shouldGenerateResponse.reason}`);
 
             // Step 4: Atomically save email and mark as webhook processed FOR THIS USER
             const result = await emailModel.saveEmailAndMarkAsWebhookProcessedForUser(parsedEmail, userId);
             if (!result.success) {
-              pinoLogger.debug({ subject: parsedEmail.subject }, 'webhook.email.parallel.duplicate');
+              console.log(`⏭️ [PARALLEL] Email already processed by webhook for this user, skipping draft generation`);
               return {
                 status: 'duplicate',
                 emailId: parsedEmail.id,
@@ -4904,42 +4832,33 @@ initializeServices().then(() => {
             const emailId = result.emailId!;
 
             // 🚀 PHASE 3: Process email through intelligent router (replaces dual processing)
-            pinoLogger.debug({ emailId: parsedEmail.id }, 'webhook.email.parallel.routing');
+            console.log(`🧠 [PARALLEL] Routing email ${parsedEmail.id} through intelligent router...`);
             const routingResult = await intelligentEmailRouter.routeEmail(
               parsedEmail,
               userId,
               emailId // Use the email DB ID we already have
             );
 
-            pinoLogger.info({
-              emailId,
-              subject: parsedEmail.subject,
-              route: routingResult.routingDecision.route,
-              reasoning: routingResult.routingDecision.reasoning,
-              userId: sanitizeUserId(userId)
-            }, 'webhook.email.parallel.routed');
+            console.log(`✅ [PARALLEL] Email routed to ${routingResult.routingDecision.route.toUpperCase()} pipeline`);
+            console.log(`🎯 [PARALLEL] Routing reasoning: ${routingResult.routingDecision.reasoning}`);
 
             if (routingResult.meetingResult?.isMeetingRequest) {
-              pinoLogger.info({
-                emailId,
-                meetingType: routingResult.meetingResult.meetingRequest?.meetingType,
-                confidence: routingResult.meetingResult.confidence,
-                actionTaken: routingResult.meetingResult.response?.actionTaken
-              }, 'webhook.email.parallel.meeting_detected');
+              console.log(`📅 [PARALLEL] Meeting detected! Type: ${routingResult.meetingResult.meetingRequest?.meetingType}, Confidence: ${routingResult.meetingResult.confidence}%`);
+              if (routingResult.meetingResult.response) {
+                console.log(`🤖 [PARALLEL] Meeting response generated: ${routingResult.meetingResult.response.actionTaken}`);
+              }
             } else if (routingResult.autoDraftResult) {
-              pinoLogger.info({
-                emailId,
-                draftSubject: routingResult.autoDraftResult.subject,
-                tone: routingResult.autoDraftResult.tone,
-                urgency: routingResult.autoDraftResult.urgencyLevel
-              }, 'webhook.email.parallel.draft_generated');
+              console.log(`📝 [PARALLEL] Auto-draft generated: "${routingResult.autoDraftResult.subject}"`);
+              console.log(`🎯 [PARALLEL] Tone: ${routingResult.autoDraftResult.tone}, Urgency: ${routingResult.autoDraftResult.urgencyLevel}`);
+            } else if (routingResult.routingDecision.route === 'skip') {
+              console.log(`⏭️ [PARALLEL] Email skipped: ${routingResult.routingDecision.reasoning}`);
             }
 
             const totalProcessingTime = Date.now() - processingStartTime;
-            pinoLogger.debug({
-              emailId,
-              processingTime: totalProcessingTime
-            }, 'webhook.email.parallel.timing');
+            console.log(`⚡ [PARALLEL] Email processing time: ${totalProcessingTime}ms`);
+
+            // Email is already marked as webhook_processed by the atomic operation above
+            console.log(`🏷️ [PARALLEL] Email ID ${emailId} already marked as webhook_processed = true`);
 
             return {
               status: 'success',
@@ -4948,11 +4867,7 @@ initializeServices().then(() => {
             };
 
           } catch (emailError) {
-            pinoLogger.error({
-              emailId: emailData.id || 'unknown',
-              error: emailError instanceof Error ? emailError.message : String(emailError),
-              userId: sanitizeUserId(userId)
-            }, 'webhook.email.parallel.error');
+            console.error(`❌ [PARALLEL] Error processing email:`, emailError);
             return {
               status: 'error',
               emailId: emailData.id || 'unknown',
@@ -4965,11 +4880,7 @@ initializeServices().then(() => {
         // Step 2: Process emails in parallel with concurrency limit (SAFE PARALLEL PROCESSING)
         if (emailsToProcess.length > 0) {
           const CONCURRENCY_LIMIT = 3; // Limit concurrent API calls to avoid rate limits
-          pinoLogger.info({
-            emailCount: emailsToProcess.length,
-            concurrencyLimit: CONCURRENCY_LIMIT,
-            userId: sanitizeUserId(userId)
-          }, 'webhook.email.parallel.batch_start');
+          console.log(`🔄 [PARALLEL] Processing ${emailsToProcess.length} emails with concurrency limit: ${CONCURRENCY_LIMIT}`);
 
           const processWithConcurrencyLimit = async (): Promise<Array<{
             status: 'success' | 'skipped' | 'duplicate' | 'error';
@@ -4987,10 +4898,7 @@ initializeServices().then(() => {
             for (let i = 0; i < emailsToProcess.length; i += CONCURRENCY_LIMIT) {
               const batch = emailsToProcess.slice(i, i + CONCURRENCY_LIMIT);
               const batchNumber = Math.floor(i / CONCURRENCY_LIMIT) + 1;
-              pinoLogger.debug({
-                batchNumber,
-                batchSize: batch.length
-              }, 'webhook.email.parallel.batch_processing');
+              console.log(`🔄 [PARALLEL] Processing batch ${batchNumber}: ${batch.length} emails`);
 
               // Process batch in parallel using Promise.allSettled for safe error handling
               const batchPromises = batch.map(emailData => processEmailSafe(emailData));
@@ -5001,11 +4909,7 @@ initializeServices().then(() => {
                 if (result.status === 'fulfilled') {
                   results.push(result.value);
                 } else {
-                  pinoLogger.error({
-                    batchNumber,
-                    emailIndex: index + 1,
-                    error: result.reason?.message || 'Unknown error'
-                  }, 'webhook.email.parallel.batch_failed');
+                  console.error(`❌ [PARALLEL] Batch ${batchNumber} email ${index + 1} failed:`, result.reason);
                   results.push({
                     status: 'error',
                     emailId: batch[index]?.id || 'unknown',
@@ -5031,31 +4935,24 @@ initializeServices().then(() => {
           const duplicates = processingResults.filter(r => r.status === 'duplicate').length;
           const errors = processingResults.filter(r => r.status === 'error').length;
 
-          pinoLogger.info({
-            successful,
-            skipped,
-            duplicates,
-            errors,
-            totalEmails: processingResults.length,
-            userId: sanitizeUserId(userId)
-          }, 'webhook.email.parallel.summary');
+          console.log(`📊 [PARALLEL] Processing Summary:`);
+          console.log(`   ✅ Successful: ${successful}`);
+          console.log(`   ⏭️ Skipped: ${skipped}`);
+          console.log(`   🔄 Duplicates: ${duplicates}`);
+          console.log(`   ❌ Errors: ${errors}`);
+
+          if (successful > 0 || skipped > 0) {
+            console.log(`🎉 [PARALLEL] Successfully processed ${successful + skipped} emails!`);
+          }
         } else {
-          pinoLogger.debug({ userId: sanitizeUserId(userId) }, 'webhook.email.no_emails_to_process');
+          console.log(`📭 [PARALLEL] No emails to process`);
         }
 
         const totalTime = Date.now() - startTime;
-        pinoLogger.info({
-          totalTime,
-          userId: sanitizeUserId(userId),
-          historyId: notification.historyId
-        }, 'webhook.email.processing_complete');
-
+        console.log(`🎉 Gmail notification processing COMPLETE! Total time: ${totalTime}ms`);
+        
       } catch (error) {
-        pinoLogger.error({
-          error: error instanceof Error ? error.message : String(error),
-          userId: sanitizeUserId(userId),
-          historyId: notification.historyId
-        }, 'webhook.email.processing_error');
+        console.error('❌ Error in processGmailNotification:', error);
         
         // Graceful degradation - store for manual processing
         await _storeFailedNotification(notification, error);
@@ -5068,11 +4965,7 @@ initializeServices().then(() => {
       const subject = email.subject;
       const body = email.body;
 
-      pinoLogger.debug({
-        subject,
-        from: fromEmail,
-        userId: sanitizeUserId(userId)
-      }, 'webhook.filter.start');
+      console.log(`🔍 Smart filtering email: "${subject}" from ${fromEmail}`);
 
       // 🛡️ INFINITE LOOP PREVENTION - TEMPORARILY DISABLED FOR TESTING
       // TODO: Re-enable with smarter logic that doesn't block user's own email
@@ -5124,10 +5017,7 @@ initializeServices().then(() => {
       }
       */
 
-      pinoLogger.debug({
-        subject,
-        from: fromEmail
-      }, 'webhook.filter.loop_prevention_disabled');
+      console.log(`✅ [LOOP PREVENTION DISABLED] Proceeding with email processing: "${subject}" from ${fromEmail}`);
 
       // Skip no-reply addresses (fast check)
       const noReplyPatterns = ['no-reply', 'noreply', 'do-not-reply', 'donotreply'];
@@ -5160,27 +5050,18 @@ initializeServices().then(() => {
               classification_reason: 'newsletter',
               received_at: email.date
             });
-            pinoLogger.info({
-              userId: sanitizeUserId(userId),
-              subject
-            }, 'webhook.filter.promotional_saved');
+            console.log(`📰 Promotional email saved for user ${userId}: "${subject}"`);
           } catch (saveError) {
-            pinoLogger.error({
-              userId: sanitizeUserId(userId),
-              error: saveError instanceof Error ? saveError.message : String(saveError)
-            }, 'webhook.filter.promotional_save_failed');
+            console.error('❌ Error saving promotional email:', saveError);
             // Continue with filtering even if save fails
           }
-
+          
           return { generate: false, reason: 'AI classified as newsletter/promotional content', classification: 'newsletter' };
         } else {
           return { generate: true, reason: 'AI classified as personal/business communication', classification: 'personal' };
         }
       } catch (error) {
-        pinoLogger.error({
-          userId: sanitizeUserId(userId),
-          error: error instanceof Error ? error.message : String(error)
-        }, 'webhook.filter.classification_failed');
+        console.error('❌ AI classification failed, defaulting to generate:', error);
         return { generate: true, reason: 'AI classification failed - defaulting to process' };
       }
     }

@@ -34,6 +34,12 @@ npm run test:api               # Test user experience flows
 npx tsx scripts/database/apply-indexes.ts              # Apply Phase 1 critical indexes
 npx tsx scripts/database/verify-no-damage.ts           # Verify database integrity
 npx tsx scripts/database/test-index-performance.ts     # Test query performance with EXPLAIN ANALYZE
+
+# Webhook Management (Development)
+./scripts/update-webhooks.sh dev <ngrok-url>           # Update dev webhook to new ngrok URL
+./scripts/update-webhooks.sh status                    # Check current webhook URLs
+# Example: ./scripts/update-webhooks.sh dev https://5a069f19bcd6.ngrok-free.app
+# Note: Also update WEBHOOK_DOMAIN in .env file and restart server
 ```
 
 ## Architecture
@@ -87,6 +93,12 @@ logger.warn({ attempt: 2, maxRetries: 3 }, 'db.query.retry');
 - `LOG_LEVEL=debug` - Show all logs (development default)
 - `LOG_LEVEL=info` - Show info, warn, error (production default)
 - `LOG_LEVEL=error` - Show only errors (production quiet mode)
+
+**⚠️ Migration Status:**
+- ✅ Core services migrated to Pino (~200 statements)
+- ⚠️ `src/index.ts` still uses console.log (~478 statements)
+- **Impact:** High log volume in production (~40K logs/day with 10 users)
+- **Action Required:** Migrate index.ts webhook handler to structured logging post-launch
 
 **Production Output (Railway logs):**
 ```json
@@ -202,7 +214,10 @@ All models are in `src/models/` and provide database access patterns:
 - All authenticated routes MUST use this middleware
 
 **Security Middleware** (`src/middleware/security.ts`):
-- Rate limiting (auth endpoints: 5 req/min, API: 100 req/min)
+- **Per-user rate limiting** - Each authenticated user gets isolated rate limit bucket
+- Rate limits: General (500 req/15min), API (800 req/15min), Auth (10 req/15min)
+- Extracts userId from JWT token before full authentication for rate limiting
+- Falls back to IP-based limiting for unauthenticated requests
 - Security headers (helmet-style)
 - Request logging with sanitization
 - Graceful shutdown handling
@@ -229,7 +244,7 @@ All models are in `src/models/` and provide database access patterns:
 3. Test locally with `npx tsx scripts/database/verify-no-damage.ts`
 4. Apply to production with `npx tsx scripts/database/apply-indexes.ts`
 
-### Redis Integration (Optional in Dev)
+### Redis Integration (REQUIRED in Production)
 
 **Location:** `src/utils/redis.ts`
 
@@ -238,10 +253,48 @@ Redis is used for webhook deduplication and distributed locking. The implementat
 ```typescript
 const lockAcquired = await redis.acquireLock(key, ttlSeconds);
 // Returns true if Redis unavailable (fail-open for development)
-// In production, must have Redis (AWS ElastiCache)
+// In production, Redis prevents duplicate webhook processing
 ```
 
-**Production Requirement:** Redis is required for multi-instance deployments to prevent duplicate webhook processing.
+**Production Setup (Railway):**
+1. Add Redis plugin in Railway dashboard
+2. Set `REDIS_URL` environment variable (use public URL: `redis://default:PASSWORD@gondola.proxy.rlwy.net:PORT`)
+3. Redis connects automatically on deployment
+4. Logs show: `✅ [REDIS] Connected successfully`
+
+**Production Requirement:** Redis is required for multi-instance deployments to prevent duplicate webhook processing and race conditions.
+
+### Frontend Polling Configuration
+
+**Location:** `frontend/src/lib/constants.ts`, `frontend/src/hooks/useSmartPolling.ts`
+
+The frontend uses **fixed-interval polling** for real-time updates:
+
+**Polling Strategy:**
+- Fixed 30-second intervals for all data fetching (emails, drafts, promotional stats)
+- Simplified from previous adaptive "smart polling" to reduce rate limiting overhead
+- Each user generates ~90 requests per 15 minutes (well within per-user rate limits)
+
+**Key Configuration:**
+```typescript
+// frontend/src/lib/constants.ts
+export const POLLING_CONFIG = {
+  FIXED_INTERVAL: 30000,     // 30 seconds - consistent polling
+  FIXED_STALE_TIME: 25000,   // 25 seconds
+  CACHE_TIME: 5 * 60 * 1000, // 5 minutes
+}
+```
+
+**Affected Hooks:**
+- `useEmails()` - Polls every 30s for new emails
+- `useDrafts()` / `useLatestDraft()` - Polls every 30s for draft updates
+- `usePromotionalEmails()` - Polls every 30s for promotional email stats
+
+**Why Fixed Intervals:**
+- Predictable rate limit consumption
+- Simpler implementation than adaptive polling
+- Gmail webhooks handle real-time notifications (polling is backup)
+- Industry standard (Gmail app polls every 15-60s)
 
 ### Environment Variables
 
@@ -258,10 +311,14 @@ NODE_ENV=production
 PORT=3000
 ```
 
-Optional for production:
+Required for production:
 ```
-REDIS_URL=redis://...                     # Webhook deduplication
-WEBHOOK_SECRET=...                        # Gmail webhook verification
+REDIS_URL=redis://...                     # Webhook deduplication (Railway Redis public URL)
+```
+
+Optional:
+```
+WEBHOOK_SECRET=...                        # Gmail webhook verification (future use)
 ```
 
 ## Critical Patterns & Conventions
@@ -400,23 +457,88 @@ npm run test:core        # Core business logic
 2. ✅ Database indexes optimized (5 critical paths)
 3. ✅ Connection pooling configured for Neon
 4. ✅ Error handling and logging in place
-5. ✅ Authentication and rate limiting enabled
-6. ⚠️ Redis required for production (webhook deduplication)
-7. ⚠️ Webhook renewal cron job needed (7-day expiry)
+5. ✅ Per-user rate limiting enabled (500 req/15min per user)
+6. ✅ Redis connected in production (Railway Redis plugin)
+7. ✅ Frontend polling optimized (fixed 30s intervals)
+8. ⚠️ Logging migration incomplete (index.ts still uses console.log)
+9. ⚠️ Webhook renewal cron job needed (7-day expiry)
+
+**Recent Production Changes (2025-10-20):**
+- ✅ Implemented per-user rate limiting (extracts userId from JWT before auth)
+- ✅ Connected Redis for webhook deduplication (Railway Redis plugin)
+- ✅ Simplified frontend polling to fixed 30s intervals
+- ✅ Increased rate limits: General (100→500), API (200→800)
 
 **Future AWS Migration:**
 - RDS PostgreSQL (migrate from Neon)
-- ElastiCache Redis (required for multi-instance)
+- ElastiCache Redis (already using Redis pattern)
 - ECS/EC2 for backend (migrate from Railway)
 - Indexes will migrate automatically with data
+
+## Webhook Management
+
+### Google Pub/Sub Configuration
+
+The app uses Google Cloud Pub/Sub for Gmail webhook notifications. There are **two separate subscriptions**:
+
+1. **Production** (`gmail-notifications-sub`): Points to Railway URL
+2. **Development** (`gmail-notifications-dev`): Points to ngrok tunnel
+
+**IMPORTANT:** When you restart ngrok and get a new URL, you MUST update the dev subscription endpoint.
+
+### Updating Development Webhook (ngrok)
+
+When you start a new ngrok tunnel, follow these steps:
+
+1. **Update .env file:**
+   ```bash
+   WEBHOOK_DOMAIN=https://NEW_NGROK_URL.ngrok-free.app
+   ```
+
+2. **Update Google Cloud Pub/Sub subscription:**
+   ```bash
+   ./scripts/update-webhooks.sh dev https://NEW_NGROK_URL.ngrok-free.app
+   ```
+
+3. **Verify the update:**
+   ```bash
+   ./scripts/update-webhooks.sh status
+   ```
+
+4. **Restart development server:**
+   ```bash
+   npm run dev
+   ```
+
+### Quick Reference Commands
+
+```bash
+# Check current webhook URLs for both dev and prod
+./scripts/update-webhooks.sh status
+
+# Update dev webhook to new ngrok URL
+./scripts/update-webhooks.sh dev https://5a069f19bcd6.ngrok-free.app
+
+# Update prod webhook (Railway URL - rarely needed)
+./scripts/update-webhooks.sh prod https://chief-ai-safe-production-b8aa.up.railway.app
+```
+
+**Project Info:**
+- Project ID: `chief-ai-470506`
+- Topic: `gmail-notifications`
+- Dev Subscription: `gmail-notifications-dev`
+- Prod Subscription: `gmail-notifications-sub`
 
 ## Common Pitfalls
 
 1. **Never create global service instances** - Always use ServiceFactory
 2. **Don't use pool.query directly** - Use queryWithRetry for Neon reliability
 3. **Initialize Gmail/Calendar services** - Call initializeForUser before use
-4. **Handle Redis gracefully** - Code must work when Redis is unavailable (dev mode)
+4. **Redis must use public URL in Railway** - Internal hostname (redis.railway.internal) won't resolve
 5. **Use IF NOT EXISTS for indexes** - Prevents deployment errors
 6. **Apply indexes with CONCURRENTLY** - Prevents table locks in production
 7. **Validate JWT tokens** - All authenticated routes need authMiddleware
 8. **Check webhook_processed flag** - Prevents duplicate email processing
+9. **Rate limiting is per-user in production** - Each authenticated user has isolated 500 req/15min bucket
+10. **Logging volume matters** - console.log in hot paths (webhooks) creates performance issues at scale
+11. **Update webhooks when ngrok restarts** - Use `./scripts/update-webhooks.sh dev <new-ngrok-url>` and update WEBHOOK_DOMAIN in .env
