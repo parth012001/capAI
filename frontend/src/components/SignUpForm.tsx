@@ -9,7 +9,8 @@ export default function SignUpForm() {
   const { signUp, isLoading, error, clearError } = useAuth();
   const [formData, setFormData] = useState({
     firstName: '',
-    lastName: ''
+    lastName: '',
+    schedulingLink: ''
   });
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
@@ -53,7 +54,8 @@ export default function SignUpForm() {
     localStorage.setItem('chief_ai_signup_data', JSON.stringify({
       firstName: formData.firstName.trim(),
       lastName: formData.lastName.trim(),
-      fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`
+      fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
+      schedulingLink: formData.schedulingLink.trim()
     }));
 
     // Clear any existing errors
@@ -241,6 +243,26 @@ export default function SignUpForm() {
                 <span className="text-lg">⚠</span> {errors.lastName}
               </motion.p>
             )}
+          </div>
+
+          {/* Scheduling Link - Optional */}
+          <div>
+            <label htmlFor="schedulingLink" className="block text-sm font-semibold text-slate-700 mb-2">
+              Meeting Link <span className="text-slate-400 font-normal">(Optional)</span>
+            </label>
+            <input
+              type="url"
+              id="schedulingLink"
+              name="schedulingLink"
+              value={formData.schedulingLink}
+              onChange={handleInputChange}
+              className="w-full px-5 py-4 border-2 border-slate-200 bg-white hover:border-slate-300 rounded-xl focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500 transition-all duration-200 text-slate-900 placeholder:text-slate-400"
+              placeholder="https://calendly.com/yourname"
+              disabled={isLoading}
+            />
+            <p className="mt-2 text-xs text-slate-500 leading-relaxed">
+              📅 Captain AI will use this link when drafting meeting invites or handling scheduling conflicts
+            </p>
           </div>
 
           {/* Error Message */}

@@ -49,9 +49,22 @@ export default function ProfileSetup() {
       });
 
       if (response.status === 200) {
+        // Save scheduling link if provided
+        if (profileData.schedulingLink && profileData.schedulingLink.trim()) {
+          try {
+            await api.put('/api/user/scheduling-link', {
+              schedulingLink: profileData.schedulingLink.trim()
+            });
+            console.log('✅ Scheduling link saved');
+          } catch (linkError) {
+            console.error('⚠️ Failed to save scheduling link:', linkError);
+            // Don't block the flow if scheduling link fails
+          }
+        }
+
         // Clear signup data from localStorage
         localStorage.removeItem('chief_ai_signup_data');
-        
+
         // Navigate to existing onboarding
         navigate('/onboarding');
       } else {
