@@ -14,6 +14,7 @@ export default function ProfileSetup() {
     firstName: string;
     lastName: string;
     fullName: string;
+    schedulingLink?: string;
   } | null>(null);
 
   useEffect(() => {
