@@ -4332,7 +4332,7 @@ initializeServices().then(() => {
             // PRODUCTION: Idempotency check to prevent duplicate processing
             // Use historyId as unique identifier for this webhook event
             const lockKey = `webhook:gmail:${notification.historyId || Date.now()}`;
-            const lockAcquired = await redis.acquireLock(lockKey, 300); // 5 min TTL
+            const lockAcquired = await redis.acquireLock(lockKey, 60); // ✅ PHASE 1: 1 min TTL (only for deduplication)
 
             if (!lockAcquired) {
               pinoLogger.warn({ historyId: notification.historyId }, 'webhook.gmail.duplicate_skipped');
@@ -4341,7 +4341,19 @@ initializeServices().then(() => {
 
             pinoLogger.debug({ historyId: notification.historyId }, 'webhook.gmail.lock_acquired');
 
-            // Process the notification asynchronously FOR ALL ACTIVE USERS
+            // ✅ PHASE 1 OPTIMIZATION: Release lock immediately after deduplication check
+            // Lock is only for preventing duplicate webhook acceptance, not for processing duration
+            // This allows next webhook to be accepted while previous one is still processing
+            setTimeout(() => {
+              redis.releaseLock(lockKey).catch(err => {
+                pinoLogger.debug({
+                  lockKey,
+                  error: err instanceof Error ? err.message : String(err)
+                }, 'webhook.gmail.lock_release_error');
+              });
+            }, 100); // Release after 100ms (ensures dedup window)
+
+            // Process the notification asynchronously FOR ALL ACTIVE USERS (non-blocking)
             processGmailNotificationMultiUser(notification).then(() => {
               // Update processing heartbeat
               webhookHeartbeat.lastProcessed = new Date();
@@ -4350,16 +4362,11 @@ initializeServices().then(() => {
                 historyId: notification.historyId,
                 totalProcessed: webhookHeartbeat.totalProcessed
               }, 'webhook.gmail.processing_complete');
-
-              // Keep lock for 5 minutes to prevent reprocessing
-              // Lock will auto-expire after TTL
             }).catch(error => {
               pinoLogger.error({
                 historyId: notification.historyId,
                 error: error instanceof Error ? error.message : String(error)
               }, 'webhook.gmail.processing_failed');
-              // Release lock on error to allow retry
-              redis.releaseLock(lockKey);
             });
           } catch (parseError) {
             pinoLogger.error({
@@ -4381,24 +4388,28 @@ initializeServices().then(() => {
     app.post('/test-webhook', async (_req, res) => {
       try {
         console.log('🧪 Manual webhook test triggered...');
-        
+
         // Simulate a Gmail webhook notification (general notification, not specific email)
         const testNotification = {
           historyId: Date.now().toString(),
           messageId: null // This will trigger the "check recent emails" flow
         };
-        
-        // Process the simulated notification for all users
-        await processGmailNotificationMultiUser(testNotification);
-        
+
+        // ✅ PHASE 1: Process asynchronously like production webhook handler
+        processGmailNotificationMultiUser(testNotification).catch(error => {
+          console.error('❌ Test webhook processing failed:', error);
+        });
+
+        // Respond immediately (mimics production behavior)
         res.json({
-          message: 'Test webhook processing completed',
+          message: 'Test webhook dispatched (processing in background)',
           notification: testNotification,
-          timestamp: new Date()
+          timestamp: new Date(),
+          note: 'Check logs for processing status'
         });
       } catch (error) {
         console.error('❌ Error in test webhook:', error);
-        res.status(500).json({ error: 'Test webhook processing failed' });
+        res.status(500).json({ error: 'Test webhook dispatch failed' });
       }
     });
 
@@ -4701,8 +4712,36 @@ initializeServices().then(() => {
             }
           });
 
-          // Wait for all user processing to complete
-          await Promise.allSettled(processingPromises);
+          // ✅ PHASE 1 OPTIMIZATION: Fire and forget - don't block webhook handler
+          // Process in background, track results for monitoring
+          Promise.allSettled(processingPromises)
+            .then(results => {
+              const succeeded = results.filter(r => r.status === 'fulfilled').length;
+              const failed = results.filter(r => r.status === 'rejected').length;
+
+              pinoLogger.info({
+                total: results.length,
+                succeeded,
+                failed,
+                historyId: notification.historyId
+              }, 'webhook.multiuser.fallback_batch_complete');
+
+              if (failed > 0) {
+                pinoLogger.warn({
+                  failed,
+                  total: results.length,
+                  historyId: notification.historyId
+                }, 'webhook.multiuser.fallback_some_failed');
+              }
+            })
+            .catch(error => {
+              pinoLogger.error({
+                error: error instanceof Error ? error.message : String(error),
+                historyId: notification.historyId
+              }, 'webhook.multiuser.fallback_batch_error');
+            });
+
+          // Return immediately - don't wait for processing
           return;
         }
 
@@ -4769,10 +4808,38 @@ initializeServices().then(() => {
           }
         });
 
-        // Wait for all user processing to complete
-        await Promise.allSettled(processingPromises);
+        // ✅ PHASE 1 OPTIMIZATION: Fire and forget - don't block webhook handler
+        // Process in background, track results for monitoring
+        Promise.allSettled(processingPromises)
+          .then(results => {
+            const succeeded = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected').length;
 
-        pinoLogger.info('webhook.multiuser.complete');
+            pinoLogger.info({
+              total: results.length,
+              succeeded,
+              failed,
+              targetEmail,
+              historyId: notification.historyId
+            }, 'webhook.multiuser.specific_complete');
+
+            if (failed > 0) {
+              pinoLogger.error({
+                targetEmail,
+                historyId: notification.historyId
+              }, 'webhook.multiuser.specific_failed');
+            }
+          })
+          .catch(error => {
+            pinoLogger.error({
+              error: error instanceof Error ? error.message : String(error),
+              targetEmail,
+              historyId: notification.historyId
+            }, 'webhook.multiuser.specific_batch_error');
+          });
+
+        // Return immediately - don't wait for processing
+        pinoLogger.info({ targetEmail }, 'webhook.multiuser.dispatched');
 
       } catch (error) {
         pinoLogger.error({
