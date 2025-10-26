@@ -19,6 +19,7 @@
     "test:api": "node tests/integration/test_user_experience.js"
   },
   "dependencies": {
+    "@composio/core": "^0.2.0",
     "@types/cors": "^2.8.19",
     "@types/ioredis": "^4.28.10",
     "@types/multer": "^2.0.0",

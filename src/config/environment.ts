@@ -11,10 +11,15 @@ export interface EnvironmentConfig {
   // Database Configuration
   DATABASE_URL: string;
 
-  // Google OAuth Configuration
+  // Google OAuth Configuration (Legacy - keep for rollback)
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
   GOOGLE_REDIRECT_URI: string;
+
+  // Composio Configuration (NEW)
+  COMPOSIO_API_KEY?: string;
+  USE_COMPOSIO?: boolean;
+  WEBHOOK_DOMAIN?: string;
 
   // OpenAI Configuration
   OPENAI_API_KEY: string;
@@ -96,6 +101,9 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID!,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
     GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI!,
+    COMPOSIO_API_KEY: process.env.COMPOSIO_API_KEY,
+    USE_COMPOSIO: process.env.USE_COMPOSIO === 'true',
+    WEBHOOK_DOMAIN: process.env.WEBHOOK_DOMAIN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY!,
     JWT_SECRET: jwtSecret,
     LOG_LEVEL: logLevel as 'debug' | 'info' | 'warn' | 'error',
@@ -110,6 +118,10 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
   console.log(`   - Log Level: ${config.LOG_LEVEL}`);
   console.log(`   - Database: ${config.DATABASE_URL.replace(/\/\/.*@/, '//***:***@')}`); // Hide credentials
   console.log(`   - Google OAuth: ${config.GOOGLE_CLIENT_ID.substring(0, 12)}...`);
+  console.log(`   - Composio: ${config.USE_COMPOSIO ? 'ENABLED' : 'DISABLED'}`);
+  if (config.COMPOSIO_API_KEY) {
+    console.log(`   - Composio API Key: ${config.COMPOSIO_API_KEY.substring(0, 8)}...`);
+  }
   console.log(`   - OpenAI API: ${config.OPENAI_API_KEY.substring(0, 8)}...`);
 
   return config;
@@ -134,14 +146,17 @@ export function initializeEnvironment(): void {
   features = {
     // Enable detailed logging in development
     enableDebugLogging: env.NODE_ENV === 'development',
-    
+
     // Enable strict security in production
     enableStrictSecurity: env.NODE_ENV === 'production',
-    
+
     // Enable webhook testing endpoints in development
     enableWebhookTesting: env.NODE_ENV !== 'production',
-    
+
     // Enable CORS for frontend
-    enableCORS: true
+    enableCORS: true,
+
+    // Composio integration (feature flag for safe migration)
+    useComposio: env.USE_COMPOSIO || false
   };
 }

@@ -17,8 +17,12 @@ export interface UserTokenData {
   lastName?: string;
   fullName?: string;
   onboardingCompleted?: boolean;
-  timezone?: string;  // NEW: User's IANA timezone
-  timezoneUpdatedAt?: Date;  // NEW: When timezone was last updated
+  timezone?: string;  // User's IANA timezone
+  timezoneUpdatedAt?: Date;  // When timezone was last updated
+  composioEntityId?: string;  // NEW: Composio entity ID
+  authMethod?: string;  // NEW: 'google_oauth' or 'composio'
+  migrationStatus?: string;  // NEW: Migration tracking
+  migratedAt?: Date;  // NEW: Migration timestamp
   createdAt: Date;
   updatedAt: Date;
 }
@@ -423,6 +427,146 @@ export class TokenStorageService {
     } catch (error) {
       console.error('❌ Error updating user profile:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Save Composio entity ID for a user (Composio integration)
+   */
+  async saveComposioEntity(
+    gmailAddress: string,
+    composioEntityId: string,
+    profileData?: {
+      firstName?: string;
+      lastName?: string;
+      fullName?: string;
+    }
+  ): Promise<string> {
+    try {
+      const userId = this.generateUserId(gmailAddress);
+
+      console.log(`💾 Saving Composio entity for user: ${gmailAddress}`);
+
+      const query = `
+        INSERT INTO user_gmail_tokens (
+          user_id, gmail_address, composio_entity_id, auth_method,
+          migration_status, migrated_at, webhook_active,
+          first_name, last_name, full_name
+        ) VALUES ($1, $2, $3, $4, $5, NOW(), true, $6, $7, $8)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+          composio_entity_id = EXCLUDED.composio_entity_id,
+          auth_method = EXCLUDED.auth_method,
+          migration_status = EXCLUDED.migration_status,
+          migrated_at = NOW(),
+          webhook_active = true,
+          first_name = COALESCE(EXCLUDED.first_name, user_gmail_tokens.first_name),
+          last_name = COALESCE(EXCLUDED.last_name, user_gmail_tokens.last_name),
+          full_name = COALESCE(EXCLUDED.full_name, user_gmail_tokens.full_name),
+          updated_at = NOW()
+        RETURNING user_id
+      `;
+
+      const values = [
+        userId,
+        gmailAddress,
+        composioEntityId,
+        'composio',
+        'completed',
+        profileData?.firstName,
+        profileData?.lastName,
+        profileData?.fullName
+      ];
+
+      const result = await queryWithRetry(query, values);
+      console.log(`✅ Composio entity saved for user ID: ${userId}`);
+
+      return userId;
+    } catch (error) {
+      console.error('❌ Error saving Composio entity:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Composio entity ID for a user
+   */
+  async getComposioEntityId(userId: string): Promise<string | null> {
+    try {
+      const query = `
+        SELECT composio_entity_id
+        FROM user_gmail_tokens
+        WHERE user_id = $1 AND auth_method = 'composio'
+      `;
+
+      const result = await queryWithRetry(query, [userId]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return result.rows[0].composio_entity_id;
+    } catch (error) {
+      console.error('❌ Error getting Composio entity ID:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Update migration status for a user
+   */
+  async updateMigrationStatus(
+    userId: string,
+    status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  ): Promise<void> {
+    try {
+      const query = `
+        UPDATE user_gmail_tokens
+        SET migration_status = $2,
+            migrated_at = CASE WHEN $2 = 'completed' THEN NOW() ELSE migrated_at END,
+            updated_at = NOW()
+        WHERE user_id = $1
+      `;
+
+      await queryWithRetry(query, [userId, status]);
+      console.log(`✅ Migration status updated for ${userId}: ${status}`);
+    } catch (error) {
+      console.error('❌ Error updating migration status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get users pending Composio migration
+   */
+  async getUsersPendingMigration(): Promise<UserTokenData[]> {
+    try {
+      const query = `
+        SELECT user_id, gmail_address, first_name, last_name, full_name,
+               auth_method, migration_status, created_at
+        FROM user_gmail_tokens
+        WHERE migration_status = 'pending'
+        AND auth_method = 'google_oauth'
+        ORDER BY created_at ASC
+      `;
+
+      const result = await queryWithRetry(query);
+      return result.rows.map((row: any) => ({
+        userId: row.user_id,
+        gmailAddress: row.gmail_address,
+        refreshTokenEncrypted: '',
+        webhookActive: false,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        fullName: row.full_name,
+        authMethod: row.auth_method,
+        migrationStatus: row.migration_status,
+        createdAt: row.created_at,
+        updatedAt: row.created_at
+      }));
+    } catch (error) {
+      console.error('❌ Error getting users pending migration:', error);
+      return [];
     }
   }
 }

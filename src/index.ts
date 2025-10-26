@@ -52,6 +52,7 @@ import multer from 'multer';
 import { google } from 'googleapis';
 import { authMiddleware, getUserId } from './middleware/auth';
 import authRoutes from './routes/auth';
+import composioWebhooksRouter from './routes/composio-webhooks';
 
 const app = express();
 const port = env.PORT;
@@ -181,6 +182,123 @@ app.use('/', healthRoutes);
 
 // Auth routes with rate limiting
 app.use('/api/auth', authRateLimit, authRoutes);
+
+// Composio webhook routes (feature flag controlled)
+if (features.useComposio) {
+  app.use('/', composioWebhooksRouter);
+  console.log('✅ Composio webhook routes enabled');
+}
+
+// ============================================================
+// COMPOSIO OAUTH ROUTES (NEW - Feature Flag Controlled)
+// ============================================================
+
+// Composio OAuth signup
+app.get('/auth/composio/signup', async (req, res) => {
+  try {
+    if (!features.useComposio) {
+      return res.status(400).json({ error: 'Composio integration not enabled' });
+    }
+
+    const { ComposioAuthService } = await import('./services/composio/auth');
+    const composioAuth = new ComposioAuthService();
+
+    const frontendUrl = env.FRONTEND_URL || 'http://localhost:5173';
+    const redirectUrl = `${frontendUrl}/auth/composio/callback`;
+
+    const authUrl = await composioAuth.getOAuthUrl(redirectUrl, 'signup');
+
+    console.log('🆕 [COMPOSIO] Sign up flow initiated');
+    res.json({ authUrl, intent: 'signup', provider: 'composio' });
+  } catch (error) {
+    console.error('❌ [COMPOSIO] Sign up flow failed:', error);
+    res.status(500).json({ error: 'Failed to initiate Composio signup' });
+  }
+});
+
+// Composio OAuth signin
+app.get('/auth/composio/signin', async (req, res) => {
+  try {
+    if (!features.useComposio) {
+      return res.status(400).json({ error: 'Composio integration not enabled' });
+    }
+
+    const { ComposioAuthService } = await import('./services/composio/auth');
+    const composioAuth = new ComposioAuthService();
+
+    const frontendUrl = env.FRONTEND_URL || 'http://localhost:5173';
+    const redirectUrl = `${frontendUrl}/auth/composio/callback`;
+
+    const authUrl = await composioAuth.getOAuthUrl(redirectUrl, 'signin');
+
+    console.log('🔐 [COMPOSIO] Sign in flow initiated');
+    res.json({ authUrl, intent: 'signin', provider: 'composio' });
+  } catch (error) {
+    console.error('❌ [COMPOSIO] Sign in flow failed:', error);
+    res.status(500).json({ error: 'Failed to initiate Composio signin' });
+  }
+});
+
+// Composio OAuth callback
+app.get('/auth/composio/callback', async (req, res) => {
+  const frontendUrl = env.FRONTEND_URL || 'http://localhost:5173';
+
+  try {
+    if (!features.useComposio) {
+      return res.redirect(`${frontendUrl}/auth/callback?error=composio_disabled`);
+    }
+
+    const { connectedAccountId, state } = req.query;
+
+    if (!connectedAccountId) {
+      return res.redirect(`${frontendUrl}/auth/callback?error=no_connected_account&provider=composio`);
+    }
+
+    console.log('🔄 [COMPOSIO] Processing OAuth callback...');
+
+    const { ComposioAuthService } = await import('./services/composio/auth');
+    const composioAuth = new ComposioAuthService();
+
+    // Process OAuth callback - wait for connection to complete
+    const authResult = await composioAuth.processOAuthCallback(
+      connectedAccountId as string,
+      state as string
+    );
+
+    console.log(`✅ [COMPOSIO] Authentication successful for ${authResult.email}`);
+    console.log(`📊 [COMPOSIO] Entity ID: ${authResult.entityId}`);
+    console.log(`🔗 [COMPOSIO] Connected apps: ${authResult.connectedApps.join(', ')}`);
+
+    // Check if this is a new user (for onboarding)
+    const tokenStorage = new TokenStorageService();
+    const userData = await tokenStorage.getUserTokens(authResult.userId);
+    const isNewUser = !userData || !userData.onboardingCompleted;
+
+    // Generate JWT token for frontend authentication
+    const jwtToken = authMiddleware.generateToken(authResult.userId, authResult.email);
+
+    // Return JWT token with onboarding status
+    const authData = Buffer.from(JSON.stringify({
+      jwt_token: jwtToken,
+      user_id: authResult.userId,
+      email: authResult.email,
+      is_new_user: isNewUser,
+      needs_onboarding: isNewUser,
+      provider: 'composio',
+      entity_id: authResult.entityId
+    })).toString('base64');
+
+    // Redirect to frontend with JWT token
+    res.redirect(`${frontendUrl}/auth/callback?success=true&tokens=${encodeURIComponent(authData)}&provider=composio`);
+  } catch (error) {
+    console.error('❌ [COMPOSIO] OAuth callback failed:', error);
+    res.redirect(`${frontendUrl}/auth/callback?error=auth_failed&provider=composio`);
+  }
+});
+
+// ============================================================
+// LEGACY OAUTH ROUTES (Keep for rollback)
+// ============================================================
 
 // OAuth routes (separate from API auth routes)
 app.get('/auth', (req, res) => {
@@ -424,7 +542,7 @@ app.get('/emails/fetch', authMiddleware.authenticate, async (req, res) => {
 
     // ✅ SECURITY FIX: Use isolated service container
     const { ServiceFactory } = await import('./utils/serviceFactory');
-    const services = ServiceFactory.createFromRequest(req);
+    const services = await ServiceFactory.createFromRequest(req);
     const gmail = await services.getGmailService();
 
     const emails = await gmail.getRecentEmails(20);
@@ -1077,7 +1195,7 @@ app.post('/ai/analyze-tone-real', authMiddleware.authenticate, async (req, res) 
 
     // ✅ SECURITY FIX: Use isolated service container
     const { ServiceFactory } = await import('./utils/serviceFactory');
-    const services = ServiceFactory.createFromRequest(req);
+    const services = await ServiceFactory.createFromRequest(req);
     const gmail = await services.getGmailService();
 
     // Fetch real sent emails from Gmail with user context validation
@@ -1232,7 +1350,7 @@ app.post('/ai/refresh-tone', authMiddleware.authenticate, async (req, res) => {
 
     // ✅ SECURITY FIX: Use isolated service container
     const { ServiceFactory } = await import('./utils/serviceFactory');
-    const services = ServiceFactory.createFromRequest(req);
+    const services = await ServiceFactory.createFromRequest(req);
     const gmail = await services.getGmailService();
 
     // Fetch and analyze fresh sent emails with user context validation
@@ -1694,7 +1812,7 @@ app.post('/auto-drafts/:id/send', authMiddleware.authenticate, async (req, res) 
 
     // ✅ SECURITY FIX: Use isolated service container
     const { ServiceFactory } = await import('./utils/serviceFactory');
-    const services = ServiceFactory.createFromRequest(req);
+    const services = await ServiceFactory.createFromRequest(req);
     const gmail = await services.getGmailService();
 
     // Send email via Gmail API with user context validation
