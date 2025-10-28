@@ -8,7 +8,7 @@ const ALGORITHM = 'aes-256-gcm';
 export interface UserTokenData {
   userId: string;
   gmailAddress: string;
-  refreshTokenEncrypted: string;
+  refreshTokenEncrypted?: string;  // UPDATED: Optional for Composio users (they don't store tokens)
   accessTokenEncrypted?: string;
   accessTokenExpiresAt?: Date;
   webhookActive: boolean;
@@ -221,16 +221,22 @@ export class TokenStorageService {
 
   /**
    * Get decrypted credentials for API calls
+   * IMPORTANT: Returns null for Composio users (they don't have refresh tokens)
    */
   async getDecryptedCredentials(userId: string): Promise<TokenCredentials | null> {
     try {
       const tokenData = await this.getUserTokens(userId);
       if (!tokenData) return null;
 
+      // Composio users don't have refresh tokens
+      if (!tokenData.refreshTokenEncrypted) {
+        return null;
+      }
+
       return {
         refreshToken: this.decrypt(tokenData.refreshTokenEncrypted),
-        accessToken: tokenData.accessTokenEncrypted 
-          ? this.decrypt(tokenData.accessTokenEncrypted) 
+        accessToken: tokenData.accessTokenEncrypted
+          ? this.decrypt(tokenData.accessTokenEncrypted)
           : '',
         expiresAt: tokenData.accessTokenExpiresAt
       };
@@ -431,17 +437,24 @@ export class TokenStorageService {
   }
 
   /**
-   * Save Composio entity ID for a user (Composio integration)
+   * Save Composio entity to database after OAuth
+   *
+   * IMPORTANT: Composio users don't need refresh_token_encrypted
+   * because Composio manages token lifecycle internally.
+   * We only store the connectedAccountId for API calls.
    */
   async saveComposioEntity(
     gmailAddress: string,
-    composioEntityId: string,
+    composioEntityId: string | undefined,
     profileData?: {
       firstName?: string;
       lastName?: string;
       fullName?: string;
     }
   ): Promise<string> {
+    if (!composioEntityId) {
+      throw new Error('Composio entity ID is required');
+    }
     try {
       const userId = this.generateUserId(gmailAddress);
 
@@ -451,8 +464,9 @@ export class TokenStorageService {
         INSERT INTO user_gmail_tokens (
           user_id, gmail_address, composio_entity_id, auth_method,
           migration_status, migrated_at, webhook_active,
-          first_name, last_name, full_name
-        ) VALUES ($1, $2, $3, $4, $5, NOW(), true, $6, $7, $8)
+          first_name, last_name, full_name,
+          refresh_token_encrypted
+        ) VALUES ($1, $2, $3, $4, $5, NOW(), true, $6, $7, $8, NULL)
         ON CONFLICT (user_id)
         DO UPDATE SET
           composio_entity_id = EXCLUDED.composio_entity_id,

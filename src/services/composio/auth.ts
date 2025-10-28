@@ -53,9 +53,9 @@ export class ComposioAuthService {
    *
    * Uses connectedAccounts.link() method from official SDK
    * @param redirectUrl - URL to redirect after OAuth (your /auth/composio/callback)
-   * @param intent - 'signup' or 'signin' (for logging only, OAuth flow is the same)
    * @param authConfigId - Gmail auth config ID from Composio dashboard (required)
-   * @returns OAuth URL to redirect user to
+   * @param intent - 'signup' or 'signin' (for logging only, OAuth flow is the same)
+   * @returns OAuth URL
    */
   async getOAuthUrl(
     redirectUrl: string,
@@ -69,30 +69,40 @@ export class ComposioAuthService {
         authConfigId
       }, 'composio.auth.url.generate.start');
 
-      // Generate unique user ID for this auth attempt
-      // This becomes the entityId in Composio
-      const userId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Generate temporary entityId for this OAuth flow
+      // CRITICAL: This entityId must be reused for API calls! Store in state.
+      const tempEntityId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+      // Encode entityId in state to retrieve in callback
+      const state = Buffer.from(JSON.stringify({
+        entityId: tempEntityId,
+        intent,
+        timestamp: Date.now()
+      })).toString('base64');
+
+      // Build callback URL with state parameter
+      const callbackWithState = `${redirectUrl}?state=${encodeURIComponent(state)}`;
 
       // Create connection request using Composio's link method
-      // Per official docs: composio.connectedAccounts.link(userId, authConfigId, options)
+      // Per official docs: composio.connectedAccounts.link(entityId, authConfigId, options)
       const connectionRequest: ComposioConnectionRequest = await this.composio.connectedAccounts.link(
-        userId,
+        tempEntityId,
         authConfigId,
         {
-          callbackUrl: redirectUrl
+          callbackUrl: callbackWithState
         }
       );
 
       if (!connectionRequest.redirectUrl) {
         throw new ComposioAuthenticationError(
           'No redirect URL returned from Composio',
-          { userId, authConfigId }
+          { tempEntityId, authConfigId }
         );
       }
 
       logger.info({
         intent,
-        userId,
+        tempEntityId,
         hasRedirectUrl: !!connectionRequest.redirectUrl
       }, 'composio.auth.url.generated');
 
@@ -143,15 +153,38 @@ export class ComposioAuthService {
         );
       }
 
+      // CRITICAL FIX: Extract the original entityId from state parameter
+      let entityIdFromState: string | undefined;
+      try {
+        if (state) {
+          const decoded = JSON.parse(Buffer.from(state, 'base64').toString());
+          entityIdFromState = decoded.entityId;
+          logger.debug({ entityIdFromState }, 'composio.auth.entity.extracted');
+        }
+      } catch (e) {
+        logger.error({ state, error: e }, 'composio.auth.state.parse.failed');
+        throw new ComposioAuthenticationError(
+          'Failed to parse state parameter - entity ID required for API calls',
+          { state }
+        );
+      }
+
+      if (!entityIdFromState) {
+        throw new ComposioAuthenticationError(
+          'No entity ID found in state - cannot make API calls',
+          { connectedAccountId }
+        );
+      }
+
       logger.debug({
         connectedAccountId,
+        entityId: entityIdFromState,
         status: connectedAccount.status,
-        integrationSlug: connectedAccount.toolkit.slug,
-        availableDataFields: connectedAccount.data ? Object.keys(connectedAccount.data) : []
+        integrationSlug: connectedAccount.toolkit.slug
       }, 'composio.auth.connection.complete');
 
       // Get user email by calling Gmail's getProfile API through Composio
-      // This is the proper way - let Composio SDK handle the OAuth token
+      // CRITICAL: Use the SAME entityId that was used to create the connection
       let userEmail: string;
 
       try {
@@ -159,17 +192,17 @@ export class ComposioAuthService {
 
         logger.debug({
           connectedAccountId,
+          entityId: entityIdFromState,
           attemptingProfileCall: true
         }, 'composio.auth.profile.start');
 
         // Execute Gmail's get profile action using Composio SDK
-        // This returns the authenticated user's email address
-        // Pass connectedAccountId as the 4th parameter (not as entityId)
+        // CRITICAL FIX: Pass the original entityId, not 'default'!
         const profileResult = await ComposioClient.executeAction(
-          'default',  // Dummy entityId - Composio will use connectedAccountId
+          entityIdFromState,  // Use the entity ID that created this connection
           'GMAIL_GET_PROFILE',
-          { user_id: 'me' },  // 'me' represents the authenticated user
-          connectedAccountId  // This is what Composio uses to identify the connection
+          { user_id: 'me' },
+          connectedAccountId
         );
 
         if (!profileResult?.emailAddress) {
@@ -196,21 +229,22 @@ export class ComposioAuthService {
         );
       }
 
-      // For Composio, the entityId is what we need to make API calls
-      // It's stored in connectedAccount but we need to get it from our own database
-      // The connected account ID itself is what we store as the entity reference
-      const entityId = connectedAccountId;
+      // CRITICAL FIX: Use connectedAccountId for all API calls
+      // The connectedAccountId is the stable, permanent identifier from Composio
+      // that should be used for all future API interactions
 
       logger.info({
         email: userEmail,
-        entityId: connectedAccountId
+        connectedAccountId: connectedAccountId,
+        status: connectedAccount.status
       }, 'composio.auth.account.connected');
 
-      // Save to database with proper user metadata
+      // Save to database with connectedAccountId
+      // This is what we'll use for ALL Composio API calls
       const userName = connectedAccount.data?.name as string | undefined;
       const userId = await this.tokenStorage.saveComposioEntity(
         userEmail,
-        entityId,
+        connectedAccountId,  // FIXED: Store connectedAccountId, NOT a generated entityId
         {
           fullName: userName,
           firstName: userName?.split(' ')[0],
@@ -224,12 +258,12 @@ export class ComposioAuthService {
           logger.warn('WEBHOOK_DOMAIN not configured, skipping trigger setup');
         } else {
           const webhookUrl = `${env.WEBHOOK_DOMAIN}/webhooks/composio`;
-          await ComposioTriggersService.setupGmailTrigger(entityId, webhookUrl);
-          logger.info({ entityId }, 'composio.auth.trigger.setup.success');
+          await ComposioTriggersService.setupGmailTrigger(connectedAccountId, webhookUrl);
+          logger.info({ connectedAccountId }, 'composio.auth.trigger.setup.success');
         }
       } catch (triggerError) {
         logger.warn({
-          entityId,
+          connectedAccountId,
           error: triggerError instanceof Error ? triggerError.message : String(triggerError)
         }, 'composio.auth.trigger.setup.failed');
         // Don't fail the auth if trigger setup fails - user can still use the system
@@ -238,12 +272,12 @@ export class ComposioAuthService {
       logger.info({
         userId,
         email: userEmail,
-        entityId
+        connectedAccountId
       }, 'composio.auth.callback.success');
 
       return {
         userId,
-        entityId,
+        entityId: connectedAccountId,  // FIXED: Return connectedAccountId as entityId
         email: userEmail,
         connectedApps: [connectedAccount.toolkit.slug]
       };

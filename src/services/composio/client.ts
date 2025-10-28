@@ -44,14 +44,14 @@ export class ComposioClient {
   /**
    * Execute a Composio action with error handling and logging
    *
-   * @param entityIdOrConnectedAccountId - User's Composio entity ID or connected account ID
+   * @param entityId - User's Composio entity ID (must match the entity that created the connection!)
    * @param action - Action name (e.g., 'GMAIL_SEND_EMAIL')
    * @param params - Action parameters
-   * @param connectedAccountId - Optional connected account ID if first param is entityId
+   * @param connectedAccountId - Optional connected account ID to specify which connection to use
    * @returns Action execution result
    */
   static async executeAction(
-    entityIdOrConnectedAccountId: string,
+    entityId: string,
     action: string,
     params: Record<string, any>,
     connectedAccountId?: string
@@ -61,19 +61,19 @@ export class ComposioClient {
 
     try {
       logger.debug({
-        entityId: sanitizeUserId(entityIdOrConnectedAccountId),
+        entityId: sanitizeUserId(entityId),
         action,
         paramsKeys: Object.keys(params),
         hasConnectedAccountId: !!connectedAccountId
       }, 'composio.action.start');
 
-      // Proper SDK usage: execute(slug: string, body: ToolExecuteParams, modifiers?: ExecuteToolModifiers)
-      // When connectedAccountId is provided, use dummy userId since Composio will use the connectedAccountId
+      // CRITICAL FIX: Pass the actual entityId, not 'default'!
+      // The entity ID must match the entity that created the connection
       const executeParams: ComposioToolExecuteParams = {
-        userId: 'default', // Dummy value when using connectedAccountId
+        userId: entityId,  // FIXED: Use the actual entity ID!
         arguments: params,
-        connectedAccountId: connectedAccountId || entityIdOrConnectedAccountId,
-        dangerouslySkipVersionCheck: true // Skip version check for now (TODO: add proper versions)
+        connectedAccountId: connectedAccountId,
+        dangerouslySkipVersionCheck: true
       };
 
       const result: ComposioToolExecuteResponse = await client.tools.execute(action, executeParams);
@@ -91,7 +91,7 @@ export class ComposioClient {
       }
 
       logger.info({
-        entityId: sanitizeUserId(entityIdOrConnectedAccountId),
+        entityId: sanitizeUserId(entityId),
         action,
         duration,
         success: result.successful
@@ -102,7 +102,7 @@ export class ComposioClient {
       const duration = Date.now() - startTime;
 
       logger.error({
-        entityId: sanitizeUserId(entityIdOrConnectedAccountId),
+        entityId: sanitizeUserId(entityId),
         action,
         duration,
         error: error instanceof Error ? error.message : String(error)

@@ -95,6 +95,30 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     process.exit(1);
   }
 
+  // Validate Composio configuration
+  const useComposio = process.env.USE_COMPOSIO === 'true';
+  if (useComposio) {
+    const composioMissingVars = [];
+    if (!process.env.COMPOSIO_API_KEY) {
+      composioMissingVars.push('COMPOSIO_API_KEY');
+    }
+    if (!process.env.COMPOSIO_AUTH_CONFIG_ID) {
+      composioMissingVars.push('COMPOSIO_AUTH_CONFIG_ID');
+    }
+
+    if (composioMissingVars.length > 0) {
+      console.error('❌ Composio integration enabled (USE_COMPOSIO=true) but missing required variables:');
+      composioMissingVars.forEach(varName => {
+        console.error(`   - ${varName}`);
+      });
+      console.error('\nTo use Composio:');
+      console.error('  1. Set COMPOSIO_API_KEY from https://app.composio.dev/settings');
+      console.error('  2. Set COMPOSIO_AUTH_CONFIG_ID for your Gmail auth config');
+      console.error('Or set USE_COMPOSIO=false to use legacy Google OAuth');
+      process.exit(1);
+    }
+  }
+
   const config: EnvironmentConfig = {
     NODE_ENV: nodeEnv as 'development' | 'production' | 'test',
     PORT: port,
