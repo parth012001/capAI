@@ -18,6 +18,7 @@ export interface EnvironmentConfig {
 
   // Composio Configuration (NEW)
   COMPOSIO_API_KEY?: string;
+  COMPOSIO_AUTH_CONFIG_ID?: string;
   USE_COMPOSIO?: boolean;
   WEBHOOK_DOMAIN?: string;
 
@@ -102,6 +103,7 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
     GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI!,
     COMPOSIO_API_KEY: process.env.COMPOSIO_API_KEY,
+    COMPOSIO_AUTH_CONFIG_ID: process.env.COMPOSIO_AUTH_CONFIG_ID,
     USE_COMPOSIO: process.env.USE_COMPOSIO === 'true',
     WEBHOOK_DOMAIN: process.env.WEBHOOK_DOMAIN,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY!,

@@ -44,30 +44,35 @@ export class ComposioClient {
   /**
    * Execute a Composio action with error handling and logging
    *
-   * @param entityId - User's Composio entity ID
+   * @param entityIdOrConnectedAccountId - User's Composio entity ID or connected account ID
    * @param action - Action name (e.g., 'GMAIL_SEND_EMAIL')
    * @param params - Action parameters
+   * @param connectedAccountId - Optional connected account ID if first param is entityId
    * @returns Action execution result
    */
   static async executeAction(
-    entityId: string,
+    entityIdOrConnectedAccountId: string,
     action: string,
-    params: Record<string, any>
+    params: Record<string, any>,
+    connectedAccountId?: string
   ): Promise<any> {
     const startTime = Date.now();
     const client = ComposioClient.getInstance();
 
     try {
       logger.debug({
-        entityId: sanitizeUserId(entityId),
+        entityId: sanitizeUserId(entityIdOrConnectedAccountId),
         action,
-        paramsKeys: Object.keys(params)
+        paramsKeys: Object.keys(params),
+        hasConnectedAccountId: !!connectedAccountId
       }, 'composio.action.start');
 
       // Proper SDK usage: execute(slug: string, body: ToolExecuteParams, modifiers?: ExecuteToolModifiers)
+      // When connectedAccountId is provided, use dummy userId since Composio will use the connectedAccountId
       const executeParams: ComposioToolExecuteParams = {
-        userId: entityId,
+        userId: 'default', // Dummy value when using connectedAccountId
         arguments: params,
+        connectedAccountId: connectedAccountId || entityIdOrConnectedAccountId,
         dangerouslySkipVersionCheck: true // Skip version check for now (TODO: add proper versions)
       };
 
@@ -86,7 +91,7 @@ export class ComposioClient {
       }
 
       logger.info({
-        entityId: sanitizeUserId(entityId),
+        entityId: sanitizeUserId(entityIdOrConnectedAccountId),
         action,
         duration,
         success: result.successful
@@ -97,7 +102,7 @@ export class ComposioClient {
       const duration = Date.now() - startTime;
 
       logger.error({
-        entityId: sanitizeUserId(entityId),
+        entityId: sanitizeUserId(entityIdOrConnectedAccountId),
         action,
         duration,
         error: error instanceof Error ? error.message : String(error)

@@ -146,16 +146,53 @@ export class ComposioAuthService {
       logger.debug({
         connectedAccountId,
         status: connectedAccount.status,
-        integrationSlug: connectedAccount.toolkit.slug
+        integrationSlug: connectedAccount.toolkit.slug,
+        availableDataFields: connectedAccount.data ? Object.keys(connectedAccount.data) : []
       }, 'composio.auth.connection.complete');
 
-      // Extract user email using type-safe helper
-      const userEmail = extractEmailFromAccount(connectedAccount);
+      // Get user email by calling Gmail's getProfile API through Composio
+      // This is the proper way - let Composio SDK handle the OAuth token
+      let userEmail: string;
 
-      if (!userEmail) {
+      try {
+        const { ComposioClient } = await import('./client');
+
+        logger.debug({
+          connectedAccountId,
+          attemptingProfileCall: true
+        }, 'composio.auth.profile.start');
+
+        // Execute Gmail's get profile action using Composio SDK
+        // This returns the authenticated user's email address
+        // Pass connectedAccountId as the 4th parameter (not as entityId)
+        const profileResult = await ComposioClient.executeAction(
+          'default',  // Dummy entityId - Composio will use connectedAccountId
+          'GMAIL_GET_PROFILE',
+          { user_id: 'me' },  // 'me' represents the authenticated user
+          connectedAccountId  // This is what Composio uses to identify the connection
+        );
+
+        if (!profileResult?.emailAddress) {
+          throw new Error('No email address in Gmail profile response');
+        }
+
+        userEmail = profileResult.emailAddress;
+
+        logger.info({
+          connectedAccountId,
+          email: userEmail
+        }, 'composio.auth.email.retrieved');
+
+      } catch (error) {
+        logger.error({
+          connectedAccountId,
+          error: error instanceof Error ? error.message : String(error),
+          availableData: Object.keys(connectedAccount.data || {})
+        }, 'composio.auth.email.retrieval.failed');
+
         throw new ComposioAuthenticationError(
-          'Failed to retrieve user email from Composio connected account',
-          { connectedAccountId, accountData: connectedAccount.data }
+          'Failed to retrieve user email from Composio',
+          { connectedAccountId, originalError: error }
         );
       }
 

@@ -76,13 +76,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signIn = async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-      
-      // Get auth URL from backend with signin intent
+
+      // Get auth URL from backend with signin intent (using Composio)
       const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-      const response = await fetch(`${backendUrl}/auth/signin`);
+      const response = await fetch(`${backendUrl}/auth/composio/signin`);
       const { authUrl } = await response.json();
-      
-      // Redirect to Google OAuth
+
+      // Redirect to Composio OAuth
       window.location.href = authUrl;
     } catch (error) {
       console.error('Sign in error:', error);
@@ -97,13 +97,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const signUp = async () => {
     try {
       setAuthState(prev => ({ ...prev, isLoading: true, error: null }));
-      
-      // Get auth URL from backend with signup intent
+
+      // Get auth URL from backend with signup intent (using Composio)
       const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
-      const response = await fetch(`${backendUrl}/auth/signup`);
+      const response = await fetch(`${backendUrl}/auth/composio/signup`);
       const { authUrl } = await response.json();
-      
-      // Redirect to Google OAuth
+
+      // Redirect to Composio OAuth
       window.location.href = authUrl;
     } catch (error) {
       console.error('Sign up error:', error);

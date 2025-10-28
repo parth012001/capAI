@@ -246,10 +246,10 @@ export interface ConnectedAccountListResponse {
 
 /**
  * Extract email from Composio connected account data
- * Composio stores user email in the data object
+ * For Gmail/Google OAuth, email is in the id_token JWT
  */
 export function extractEmailFromAccount(account: ComposioConnectedAccount): string | null {
-  // Email might be in different places depending on the integration
+  // Try direct email fields first
   if (account.data?.email && typeof account.data.email === 'string') {
     return account.data.email;
   }
@@ -259,5 +259,20 @@ export function extractEmailFromAccount(account: ComposioConnectedAccount): stri
   if (account.data?.user_email && typeof account.data.user_email === 'string') {
     return account.data.user_email;
   }
+
+  // For Google OAuth, decode id_token to get email
+  if (account.data?.id_token && typeof account.data.id_token === 'string') {
+    try {
+      // JWT structure: header.payload.signature
+      const payload = account.data.id_token.split('.')[1];
+      const decoded = JSON.parse(Buffer.from(payload, 'base64').toString());
+      if (decoded.email && typeof decoded.email === 'string') {
+        return decoded.email;
+      }
+    } catch (error) {
+      // If JWT decode fails, continue to other methods
+    }
+  }
+
   return null;
 }

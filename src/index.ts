@@ -200,13 +200,21 @@ app.get('/auth/composio/signup', async (req, res) => {
       return res.status(400).json({ error: 'Composio integration not enabled' });
     }
 
+    if (!env.COMPOSIO_AUTH_CONFIG_ID) {
+      console.error('❌ [COMPOSIO] COMPOSIO_AUTH_CONFIG_ID not configured in .env');
+      return res.status(500).json({ error: 'Composio auth config not configured' });
+    }
+
     const { ComposioAuthService } = await import('./services/composio/auth');
     const composioAuth = new ComposioAuthService();
 
-    const frontendUrl = env.FRONTEND_URL || 'http://localhost:5173';
-    const redirectUrl = `${frontendUrl}/auth/composio/callback`;
+    // Composio OAuth callback - use localhost for dev, production URL for prod
+    const backendUrl = env.NODE_ENV === 'production'
+      ? env.WEBHOOK_DOMAIN
+      : `http://localhost:${env.PORT}`;
+    const redirectUrl = `${backendUrl}/auth/composio/callback`;
 
-    const authUrl = await composioAuth.getOAuthUrl(redirectUrl, 'signup');
+    const authUrl = await composioAuth.getOAuthUrl(redirectUrl, env.COMPOSIO_AUTH_CONFIG_ID, 'signup');
 
     console.log('🆕 [COMPOSIO] Sign up flow initiated');
     res.json({ authUrl, intent: 'signup', provider: 'composio' });
@@ -223,13 +231,21 @@ app.get('/auth/composio/signin', async (req, res) => {
       return res.status(400).json({ error: 'Composio integration not enabled' });
     }
 
+    if (!env.COMPOSIO_AUTH_CONFIG_ID) {
+      console.error('❌ [COMPOSIO] COMPOSIO_AUTH_CONFIG_ID not configured in .env');
+      return res.status(500).json({ error: 'Composio auth config not configured' });
+    }
+
     const { ComposioAuthService } = await import('./services/composio/auth');
     const composioAuth = new ComposioAuthService();
 
-    const frontendUrl = env.FRONTEND_URL || 'http://localhost:5173';
-    const redirectUrl = `${frontendUrl}/auth/composio/callback`;
+    // Composio OAuth callback - use localhost for dev, production URL for prod
+    const backendUrl = env.NODE_ENV === 'production'
+      ? env.WEBHOOK_DOMAIN
+      : `http://localhost:${env.PORT}`;
+    const redirectUrl = `${backendUrl}/auth/composio/callback`;
 
-    const authUrl = await composioAuth.getOAuthUrl(redirectUrl, 'signin');
+    const authUrl = await composioAuth.getOAuthUrl(redirectUrl, env.COMPOSIO_AUTH_CONFIG_ID, 'signin');
 
     console.log('🔐 [COMPOSIO] Sign in flow initiated');
     res.json({ authUrl, intent: 'signin', provider: 'composio' });
@@ -248,13 +264,17 @@ app.get('/auth/composio/callback', async (req, res) => {
       return res.redirect(`${frontendUrl}/auth/callback?error=composio_disabled`);
     }
 
-    const { connectedAccountId, state } = req.query;
+    // Composio sends 'connected_account_id' (snake_case), not 'connectedAccountId'
+    const connectedAccountId = req.query.connected_account_id || req.query.connectedAccountId;
+    const state = req.query.state;
 
     if (!connectedAccountId) {
+      console.error('❌ [COMPOSIO] No connected_account_id in callback:', req.query);
       return res.redirect(`${frontendUrl}/auth/callback?error=no_connected_account&provider=composio`);
     }
 
     console.log('🔄 [COMPOSIO] Processing OAuth callback...');
+    console.log('📋 [COMPOSIO] Connected Account ID:', connectedAccountId);
 
     const { ComposioAuthService } = await import('./services/composio/auth');
     const composioAuth = new ComposioAuthService();
@@ -301,7 +321,7 @@ app.get('/auth/composio/callback', async (req, res) => {
 // ============================================================
 
 // OAuth routes (separate from API auth routes)
-app.get('/auth', (req, res) => {
+app.get('/auth', (_req, res) => {
   // ✅ SECURITY FIX: No userId yet (pre-OAuth), safe to use global gmailService for URL generation only
   const authUrl = gmailService.getAuthUrl();
   console.log('🔐 Visit this URL to authorize the app:');
@@ -310,14 +330,14 @@ app.get('/auth', (req, res) => {
 });
 
 // Intent-based auth endpoints for proper sign up/sign in flow
-app.get('/auth/signup', (req, res) => {
+app.get('/auth/signup', (_req, res) => {
   // ✅ SECURITY FIX: No userId yet (pre-OAuth), safe to use global gmailService for URL generation only
   const authUrl = gmailService.getAuthUrl('signup');
   console.log('🆕 Sign up flow initiated');
   res.json({ authUrl, intent: 'signup' });
 });
 
-app.get('/auth/signin', (req, res) => {
+app.get('/auth/signin', (_req, res) => {
   // ✅ SECURITY FIX: No userId yet (pre-OAuth), safe to use global gmailService for URL generation only
   const authUrl = gmailService.getAuthUrl('signin');
   console.log('🔐 Sign in flow initiated');
