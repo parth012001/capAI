@@ -287,7 +287,9 @@ export class TokenStorageService {
                access_token_encrypted, access_token_expires_at,
                webhook_active, webhook_expires_at, created_at, updated_at
         FROM user_gmail_tokens
-        WHERE webhook_active = true AND refresh_token_encrypted IS NOT NULL
+        WHERE webhook_active = true
+          AND refresh_token_encrypted IS NOT NULL
+          AND (auth_method IS NULL OR auth_method != 'composio')
         ORDER BY created_at ASC
       `;
 
@@ -375,10 +377,11 @@ export class TokenStorageService {
                access_token_encrypted, access_token_expires_at,
                webhook_active, webhook_expires_at, created_at, updated_at
         FROM user_gmail_tokens
-        WHERE webhook_active = true 
-          AND webhook_expires_at IS NOT NULL 
+        WHERE webhook_active = true
+          AND webhook_expires_at IS NOT NULL
           AND webhook_expires_at <= NOW() + INTERVAL '24 hours'
           AND refresh_token_encrypted IS NOT NULL
+          AND (auth_method IS NULL OR auth_method != 'composio')
         ORDER BY webhook_expires_at ASC
       `;
 
