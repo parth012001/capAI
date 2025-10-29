@@ -10,6 +10,7 @@
  */
 
 import { Composio } from '@composio/core';
+import { randomUUID } from 'crypto';
 import { env } from '../../config/environment';
 import { logger } from '../../utils/pino-logger';
 import { TokenStorageService } from '../tokenStorage';
@@ -69,13 +70,23 @@ export class ComposioAuthService {
         authConfigId
       }, 'composio.auth.url.generate.start');
 
-      // Generate temporary entityId for this OAuth flow
-      // CRITICAL: This entityId must be reused for API calls! Store in state.
-      const tempEntityId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // ✅ CRITICAL FIX: Generate PERMANENT UUID-based entity ID BEFORE OAuth
+      // This solves the chicken-and-egg problem:
+      // - We need entityId BEFORE OAuth (for Composio to create connection)
+      // - But we don't know user email until AFTER OAuth
+      // Solution: Use UUID that's permanent and email-independent
+      // Format: entity_a1b2c3d4-e5f6-7890-...
+      const permanentEntityId = `entity_${randomUUID()}`;
+
+      logger.info({
+        entityId: permanentEntityId,
+        intent
+      }, 'composio.auth.entity.generated');
 
       // Encode entityId in state to retrieve in callback
+      // CRITICAL: This same entityId will be used throughout
       const state = Buffer.from(JSON.stringify({
-        entityId: tempEntityId,
+        entityId: permanentEntityId,  // ✅ Permanent UUID
         intent,
         timestamp: Date.now()
       })).toString('base64');
@@ -84,9 +95,10 @@ export class ComposioAuthService {
       const callbackWithState = `${redirectUrl}?state=${encodeURIComponent(state)}`;
 
       // Create connection request using Composio's link method
+      // ✅ IMPORTANT: Composio will register this connection under permanentEntityId
       // Per official docs: composio.connectedAccounts.link(entityId, authConfigId, options)
       const connectionRequest: ComposioConnectionRequest = await this.composio.connectedAccounts.link(
-        tempEntityId,
+        permanentEntityId,  // ✅ Use permanent UUID
         authConfigId,
         {
           callbackUrl: callbackWithState
@@ -96,13 +108,13 @@ export class ComposioAuthService {
       if (!connectionRequest.redirectUrl) {
         throw new ComposioAuthenticationError(
           'No redirect URL returned from Composio',
-          { tempEntityId, authConfigId }
+          { entityId: permanentEntityId, authConfigId }
         );
       }
 
       logger.info({
         intent,
-        tempEntityId,
+        entityId: permanentEntityId,
         hasRedirectUrl: !!connectionRequest.redirectUrl
       }, 'composio.auth.url.generated');
 
@@ -153,38 +165,49 @@ export class ComposioAuthService {
         );
       }
 
-      // CRITICAL FIX: Extract the original entityId from state parameter
-      let entityIdFromState: string | undefined;
+      // ✅ CRITICAL: Extract the permanent UUID entity ID from state parameter
+      // This is the SAME entity ID we generated BEFORE OAuth
+      // Format: entity_a1b2c3d4-e5f6-7890-...
+      let permanentEntityId: string | undefined;
       try {
         if (state) {
           const decoded = JSON.parse(Buffer.from(state, 'base64').toString());
-          entityIdFromState = decoded.entityId;
-          logger.debug({ entityIdFromState }, 'composio.auth.entity.extracted');
+          permanentEntityId = decoded.entityId;
+
+          // Validate it's a UUID-based entity ID
+          if (!permanentEntityId?.startsWith('entity_')) {
+            throw new Error('Invalid entity ID format - expected entity_<uuid>');
+          }
+
+          logger.debug({
+            entityId: permanentEntityId,
+            format: 'UUID-based permanent'
+          }, 'composio.auth.entity.extracted');
         }
       } catch (e) {
         logger.error({ state, error: e }, 'composio.auth.state.parse.failed');
         throw new ComposioAuthenticationError(
-          'Failed to parse state parameter - entity ID required for API calls',
+          'Failed to parse state parameter - permanent entity ID required',
           { state }
         );
       }
 
-      if (!entityIdFromState) {
+      if (!permanentEntityId) {
         throw new ComposioAuthenticationError(
-          'No entity ID found in state - cannot make API calls',
+          'No permanent entity ID found in state - cannot make API calls',
           { connectedAccountId }
         );
       }
 
       logger.debug({
         connectedAccountId,
-        entityId: entityIdFromState,
+        entityId: permanentEntityId,
         status: connectedAccount.status,
         integrationSlug: connectedAccount.toolkit.slug
       }, 'composio.auth.connection.complete');
 
       // Get user email by calling Gmail's getProfile API through Composio
-      // CRITICAL: Use the SAME entityId that was used to create the connection
+      // ✅ IMPORTANT: Use the SAME permanent entity ID that created the connection
       let userEmail: string;
 
       try {
@@ -192,14 +215,14 @@ export class ComposioAuthService {
 
         logger.debug({
           connectedAccountId,
-          entityId: entityIdFromState,
+          entityId: permanentEntityId,
           attemptingProfileCall: true
         }, 'composio.auth.profile.start');
 
         // Execute Gmail's get profile action using Composio SDK
-        // CRITICAL FIX: Pass the original entityId, not 'default'!
+        // ✅ Use the permanent UUID entity ID
         const profileResult = await ComposioClient.executeAction(
-          entityIdFromState,  // Use the entity ID that created this connection
+          permanentEntityId,  // ✅ Use the permanent entity ID that created this connection
           'GMAIL_GET_PROFILE',
           { user_id: 'me' },
           connectedAccountId
@@ -239,12 +262,14 @@ export class ComposioAuthService {
         status: connectedAccount.status
       }, 'composio.auth.account.connected');
 
-      // Save to database with connectedAccountId
-      // This is what we'll use for ALL Composio API calls
+      // ✅ Save to database with permanent UUID entity ID
+      // entityId: UUID-based permanent identifier (entity_a1b2c3d4-...)
+      // connectedAccountId: Composio's connection identifier (ca_xxx)
       const userName = connectedAccount.data?.name as string | undefined;
       const userId = await this.tokenStorage.saveComposioEntity(
         userEmail,
-        connectedAccountId,  // FIXED: Store connectedAccountId, NOT a generated entityId
+        permanentEntityId,      // ✅ UUID entity ID (entity_xxx)
+        connectedAccountId,     // ✅ Connected account ID (ca_xxx)
         {
           fullName: userName,
           firstName: userName?.split(' ')[0],
@@ -252,17 +277,33 @@ export class ComposioAuthService {
         }
       );
 
+      logger.info({
+        userId,
+        entityId: permanentEntityId,
+        connectedAccountId
+      }, 'composio.auth.entity.saved');
+
       // Set up Gmail trigger for real-time notifications
+      // ✅ CRITICAL: Use the SAME permanent entity ID that Composio knows about
       try {
         if (!env.WEBHOOK_DOMAIN) {
           logger.warn('WEBHOOK_DOMAIN not configured, skipping trigger setup');
         } else {
           const webhookUrl = `${env.WEBHOOK_DOMAIN}/webhooks/composio`;
-          await ComposioTriggersService.setupGmailTrigger(connectedAccountId, webhookUrl);
-          logger.info({ connectedAccountId }, 'composio.auth.trigger.setup.success');
+          // ✅ Pass permanent UUID entityId that Composio registered
+          await ComposioTriggersService.setupGmailTrigger(
+            permanentEntityId,      // ✅ Permanent UUID entity ID (entity_xxx)
+            connectedAccountId,     // ✅ Connected account ID (ca_xxx)
+            webhookUrl
+          );
+          logger.info({
+            entityId: permanentEntityId,
+            connectedAccountId
+          }, 'composio.auth.trigger.setup.success');
         }
       } catch (triggerError) {
         logger.warn({
+          entityId: permanentEntityId,
           connectedAccountId,
           error: triggerError instanceof Error ? triggerError.message : String(triggerError)
         }, 'composio.auth.trigger.setup.failed');
@@ -272,12 +313,13 @@ export class ComposioAuthService {
       logger.info({
         userId,
         email: userEmail,
+        entityId: permanentEntityId,
         connectedAccountId
       }, 'composio.auth.callback.success');
 
       return {
         userId,
-        entityId: connectedAccountId,  // FIXED: Return connectedAccountId as entityId
+        entityId: permanentEntityId,  // ✅ Return permanent UUID entity ID
         email: userEmail,
         connectedApps: [connectedAccount.toolkit.slug]
       };

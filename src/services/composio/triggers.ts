@@ -26,35 +26,48 @@ export class ComposioTriggersService {
   /**
    * Set up Gmail new message trigger for a user
    *
-   * @param entityId - User's Composio entity ID
+   * CRITICAL: Composio's trigger API requires:
+   * - userId param: Your permanent entity ID (e.g., user_{userId})
+   * - connected_account_id in body: Which specific Gmail connection to monitor (e.g., ca_xxx)
+   *
+   * @param entityId - User's permanent Composio entity ID (user_{userId})
+   * @param connectedAccountId - Connected account ID to monitor (ca_xxx)
    * @param webhookUrl - Your webhook URL to receive trigger notifications
    * @returns Trigger configuration with proper typing
    */
-  static async setupGmailTrigger(entityId: string, webhookUrl: string): Promise<TriggerInstanceUpsertResponse> {
+  static async setupGmailTrigger(
+    entityId: string,
+    connectedAccountId: string,
+    webhookUrl: string
+  ): Promise<TriggerInstanceUpsertResponse> {
     try {
       const client = ComposioClient.getInstance();
 
       logger.info({
         entityId,
+        connectedAccountId,
         webhookUrl,
         trigger: 'gmail_new_gmail_message'
       }, 'composio.trigger.setup.start');
 
+      // ✅ FIXED: Pass BOTH entityId and connectedAccountId
       // Proper SDK usage: create(userId: string, slug: string, body?: TriggerInstanceUpsertParams)
       const params: TriggerInstanceUpsertParams = {
+        connectedAccountId: connectedAccountId,  // ✅ Which connection to monitor (camelCase for TypeScript)
         triggerConfig: {
           webhookUrl
         }
       };
 
       const response: TriggerInstanceUpsertResponse = await client.triggers.create(
-        entityId,
+        entityId,                        // ✅ Permanent entity ID (user_{userId})
         'gmail_new_gmail_message',
         params
       );
 
       logger.info({
         entityId,
+        connectedAccountId,
         triggerId: response.triggerId
       }, 'composio.trigger.setup.success');
 
@@ -62,6 +75,7 @@ export class ComposioTriggersService {
     } catch (error) {
       logger.error({
         entityId,
+        connectedAccountId,
         error: error instanceof Error ? error.message : String(error)
       }, 'composio.trigger.setup.failed');
       throw error;

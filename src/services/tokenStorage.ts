@@ -443,33 +443,54 @@ export class TokenStorageService {
    * because Composio manages token lifecycle internally.
    * We only store the connectedAccountId for API calls.
    */
+  /**
+   * Save Composio entity with UUID-based permanent entityId and connectedAccountId
+   *
+   * @param gmailAddress - User's Gmail address
+   * @param entityId - Permanent UUID-based entity ID (entity_a1b2c3d4-...)
+   * @param connectedAccountId - Composio's connected account ID (ca_xxx)
+   * @param profileData - User profile information
+   * @returns userId
+   */
   async saveComposioEntity(
     gmailAddress: string,
-    composioEntityId: string | undefined,
+    entityId: string,
+    connectedAccountId: string,
     profileData?: {
       firstName?: string;
       lastName?: string;
       fullName?: string;
     }
   ): Promise<string> {
-    if (!composioEntityId) {
-      throw new Error('Composio entity ID is required');
+    if (!entityId || !connectedAccountId) {
+      throw new Error('Both entity ID and connected account ID are required');
     }
+
+    // Validate entity ID format
+    if (!entityId.startsWith('entity_')) {
+      throw new Error('Invalid entity ID format - expected entity_<uuid>');
+    }
+
     try {
       const userId = this.generateUserId(gmailAddress);
 
       console.log(`💾 Saving Composio entity for user: ${gmailAddress}`);
+      console.log(`   Entity ID: ${entityId} (permanent UUID)`);
+      console.log(`   Connected Account ID: ${connectedAccountId}`);
 
       const query = `
         INSERT INTO user_gmail_tokens (
-          user_id, gmail_address, composio_entity_id, auth_method,
-          migration_status, migrated_at, webhook_active,
+          user_id, gmail_address,
+          composio_entity_id, composio_connected_account_id,
+          auth_method, migration_status, migrated_at,
+          webhook_active,
           first_name, last_name, full_name,
           refresh_token_encrypted
-        ) VALUES ($1, $2, $3, $4, $5, NOW(), true, $6, $7, $8, NULL)
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), true, $7, $8, $9, NULL)
         ON CONFLICT (user_id)
         DO UPDATE SET
           composio_entity_id = EXCLUDED.composio_entity_id,
+          composio_connected_account_id = EXCLUDED.composio_connected_account_id,
           auth_method = EXCLUDED.auth_method,
           migration_status = EXCLUDED.migration_status,
           migrated_at = NOW(),
@@ -484,7 +505,8 @@ export class TokenStorageService {
       const values = [
         userId,
         gmailAddress,
-        composioEntityId,
+        entityId,               // ✅ Permanent UUID entity ID (entity_xxx)
+        connectedAccountId,     // ✅ Connected account ID (ca_xxx)
         'composio',
         'completed',
         profileData?.firstName,
@@ -503,7 +525,7 @@ export class TokenStorageService {
   }
 
   /**
-   * Get Composio entity ID for a user
+   * Get Composio entity ID for a user (permanent identifier for SDK calls)
    */
   async getComposioEntityId(userId: string): Promise<string | null> {
     try {
@@ -522,6 +544,58 @@ export class TokenStorageService {
       return result.rows[0].composio_entity_id;
     } catch (error) {
       console.error('❌ Error getting Composio entity ID:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get Composio connected account ID for a user (for multi-account scenarios)
+   */
+  async getComposioConnectedAccountId(userId: string): Promise<string | null> {
+    try {
+      const query = `
+        SELECT composio_connected_account_id
+        FROM user_gmail_tokens
+        WHERE user_id = $1 AND auth_method = 'composio'
+      `;
+
+      const result = await queryWithRetry(query, [userId]);
+
+      if (result.rows.length === 0) {
+        return null;
+      }
+
+      return result.rows[0].composio_connected_account_id;
+    } catch (error) {
+      console.error('❌ Error getting Composio connected account ID:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get BOTH Composio IDs for a user
+   * Returns: { entityId: 'user_xxx', connectedAccountId: 'ca_xxx' }
+   */
+  async getComposioIds(userId: string): Promise<{ entityId: string; connectedAccountId: string } | null> {
+    try {
+      const query = `
+        SELECT composio_entity_id, composio_connected_account_id
+        FROM user_gmail_tokens
+        WHERE user_id = $1 AND auth_method = 'composio'
+      `;
+
+      const result = await queryWithRetry(query, [userId]);
+
+      if (result.rows.length === 0 || !result.rows[0].composio_entity_id || !result.rows[0].composio_connected_account_id) {
+        return null;
+      }
+
+      return {
+        entityId: result.rows[0].composio_entity_id,
+        connectedAccountId: result.rows[0].composio_connected_account_id
+      };
+    } catch (error) {
+      console.error('❌ Error getting Composio IDs:', error);
       return null;
     }
   }
