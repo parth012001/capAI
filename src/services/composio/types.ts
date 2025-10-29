@@ -162,12 +162,16 @@ export interface ComposioGmailMessage {
 
 /**
  * Webhook trigger payload from Composio
+ * Supports both old and new webhook formats:
+ * - Old format: trigger_name, entity_id, payload
+ * - New format: type, data (with user_id, message_id nested)
  */
 export interface ComposioTriggerPayload {
-  trigger_name: string;
-  entity_id: string;
-  connected_account_id: string;
-  payload: {
+  // Old format fields
+  trigger_name?: string;
+  entity_id?: string;
+  connected_account_id?: string;
+  payload?: {
     messageId?: string;
     threadId?: string;
     from?: string;
@@ -175,6 +179,24 @@ export interface ComposioTriggerPayload {
     [key: string]: unknown;
   };
   metadata?: Record<string, unknown>;
+
+  // New format fields
+  type?: string;
+  timestamp?: string;
+  log_id?: string;
+  data?: {
+    user_id?: string;
+    message_id?: string;
+    id?: string;
+    subject?: string;
+    sender?: string;
+    recipient?: string;
+    body_text?: string;
+    body_html?: string;
+    thread_id?: string;
+    label_ids?: string[];
+    [key: string]: unknown;
+  };
 }
 
 /**

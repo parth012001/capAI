@@ -10,7 +10,13 @@ import { logger, sanitizeUserId } from '../utils/pino-logger';
 import { redis } from '../utils/redis';
 import { ServiceFactory } from '../utils/serviceFactory';
 import { EmailModel } from '../models/Email';
+import { PromotionalEmailModel } from '../models/PromotionalEmail';
 import { IntelligentEmailRouter } from '../services/intelligentEmailRouter';
+import {
+  EmailWebhookPipeline,
+  WebhookNotification,
+  IGmailService
+} from '../services/emailWebhookPipeline';
 
 const router = Router();
 
@@ -60,28 +66,55 @@ router.post('/webhooks/composio', async (req, res) => {
     // Extract trigger payload
     const triggerPayload: TriggerPayload = req.body;
 
-    if (!triggerPayload.trigger_name || !triggerPayload.entity_id) {
+    // Support both old and new Composio webhook formats
+    const triggerName = triggerPayload.trigger_name || triggerPayload.type;
+    const entityId = triggerPayload.entity_id || triggerPayload.data?.user_id;
+    const messageId = triggerPayload.payload?.messageId || triggerPayload.data?.message_id || triggerPayload.data?.id;
+
+    if (!triggerName || !entityId) {
       logger.warn({
-        payload: req.body
+        payload: req.body,
+        hasTriggerName: !!triggerPayload.trigger_name,
+        hasType: !!triggerPayload.type,
+        hasEntityId: !!triggerPayload.entity_id,
+        hasDataUserId: !!triggerPayload.data?.user_id,
+        reason: 'Missing trigger name or entity ID in both formats'
       }, 'webhook.composio.invalid_payload');
       return;
     }
 
+    // Validate entity ID format
+    if (!entityId.startsWith('entity_')) {
+      logger.error({
+        entityId,
+        expected: 'entity_<uuid>',
+        payload: req.body
+      }, 'webhook.composio.invalid_entity_format');
+      return;
+    }
+
+    logger.info({
+      triggerName,
+      entityId: sanitizeUserId(entityId),
+      messageId,
+      format: triggerPayload.trigger_name ? 'old' : 'new'
+    }, 'webhook.composio.payload_validated');
+
     // Idempotency check to prevent duplicate processing
-    const lockKey = `webhook:composio:${triggerPayload.trigger_name}:${triggerPayload.payload?.messageId || Date.now()}`;
+    const lockKey = `webhook:composio:${triggerName}:${messageId || Date.now()}`;
     const lockAcquired = await redis.acquireLock(lockKey, 60);
 
     if (!lockAcquired) {
       logger.warn({
-        trigger: triggerPayload.trigger_name,
-        messageId: triggerPayload.payload?.messageId
+        trigger: triggerName,
+        messageId
       }, 'webhook.composio.duplicate_skipped');
       return;
     }
 
     logger.debug({
-      trigger: triggerPayload.trigger_name,
-      entityId: sanitizeUserId(triggerPayload.entity_id)
+      trigger: triggerName,
+      entityId: sanitizeUserId(entityId)
     }, 'webhook.composio.lock_acquired');
 
     // Release lock after short delay (deduplication window)
@@ -97,12 +130,12 @@ router.post('/webhooks/composio', async (req, res) => {
     // Process trigger asynchronously
     setImmediate(async () => {
       try {
-        await processComposioTrigger(triggerPayload);
+        await processComposioTrigger(triggerPayload, triggerName, entityId, messageId);
         webhookStats.totalProcessed++;
         webhookStats.lastProcessed = new Date();
       } catch (error) {
         logger.error({
-          trigger: triggerPayload.trigger_name,
+          trigger: triggerName,
           error: error instanceof Error ? error.message : String(error)
         }, 'webhook.composio.processing.failed');
       }
@@ -118,46 +151,69 @@ router.post('/webhooks/composio', async (req, res) => {
 /**
  * Process Composio trigger webhook
  */
-async function processComposioTrigger(payload: TriggerPayload): Promise<void> {
+async function processComposioTrigger(
+  payload: TriggerPayload,
+  triggerName: string,
+  entityId: string,
+  messageId?: string
+): Promise<void> {
   const startTime = Date.now();
 
   logger.info({
-    trigger: payload.trigger_name,
-    entityId: sanitizeUserId(payload.entity_id)
+    trigger: triggerName,
+    entityId: sanitizeUserId(entityId),
+    messageId
   }, 'webhook.composio.process.start');
 
   try {
-    // Process trigger through ComposioTriggersService
-    const triggerData = await ComposioTriggersService.processTrigger(payload);
+    // For new format, extract trigger data directly from payload
+    let triggerData: any;
+
+    if (payload.data) {
+      // New format: data is already structured
+      triggerData = {
+        messageId: payload.data.message_id || payload.data.id,
+        threadId: payload.data.thread_id,
+        from: payload.data.sender,
+        subject: payload.data.subject,
+        bodyText: payload.data.body_text,
+        bodyHtml: payload.data.body_html,
+        labelIds: payload.data.label_ids,
+        ...payload.data
+      };
+    } else if (payload.payload) {
+      // Old format: use ComposioTriggersService
+      triggerData = await ComposioTriggersService.processTrigger(payload);
+    }
 
     if (!triggerData) {
       logger.warn({
-        trigger: payload.trigger_name
+        trigger: triggerName
       }, 'webhook.composio.process.no_data');
       return;
     }
 
     // Handle Gmail new message trigger
-    if (payload.trigger_name === 'gmail_new_gmail_message') {
-      await processGmailNewMessage(payload.entity_id, triggerData);
+    if (triggerName === 'gmail_new_gmail_message') {
+      await processGmailNewMessage(entityId, triggerData);
     }
 
     // Handle Calendar triggers
-    else if (payload.trigger_name === 'googlecalendar_event_created' ||
-             payload.trigger_name === 'googlecalendar_event_updated') {
-      await processCalendarEvent(payload.entity_id, triggerData);
+    else if (triggerName === 'googlecalendar_event_created' ||
+             triggerName === 'googlecalendar_event_updated') {
+      await processCalendarEvent(entityId, triggerData);
     }
 
     const duration = Date.now() - startTime;
     logger.info({
-      trigger: payload.trigger_name,
+      trigger: triggerName,
       duration
     }, 'webhook.composio.process.success');
 
   } catch (error) {
     const duration = Date.now() - startTime;
     logger.error({
-      trigger: payload.trigger_name,
+      trigger: triggerName,
       duration,
       error: error instanceof Error ? error.message : String(error)
     }, 'webhook.composio.process.failed');
@@ -166,7 +222,42 @@ async function processComposioTrigger(payload: TriggerPayload): Promise<void> {
 }
 
 /**
+ * Transform Composio webhook data to EmailMessage format
+ * Composio webhooks include the full email data, so we don't need to fetch it
+ */
+function transformComposioWebhookToEmailMessage(webhookData: any): any {
+  // Composio webhook structure:
+  // data: { id, message_id, thread_id, label_ids, message_text, subject, sender, to, payload: {headers, parts}, message_timestamp }
+
+  // Transform to Gmail API EmailMessage format
+  const emailMessage = {
+    id: webhookData.message_id || webhookData.id,
+    threadId: webhookData.thread_id,
+    labelIds: webhookData.label_ids || [],
+    snippet: webhookData.message_text || webhookData.preview?.body || '',
+    payload: {
+      headers: webhookData.payload?.headers || [],
+      body: webhookData.payload?.body || { size: 0 },
+      parts: webhookData.payload?.parts || []
+    },
+    internalDate: webhookData.message_timestamp
+      ? new Date(webhookData.message_timestamp).getTime().toString()
+      : Date.now().toString()
+  };
+
+  logger.debug({
+    originalId: webhookData.id,
+    transformedId: emailMessage.id,
+    hasHeaders: emailMessage.payload.headers.length > 0,
+    hasParts: emailMessage.payload.parts.length > 0
+  }, 'webhook.composio.email_transformed');
+
+  return emailMessage;
+}
+
+/**
  * Process new Gmail message from Composio trigger
+ * Uses the shared EmailWebhookPipeline (same logic as legacy Google Pub/Sub)
  */
 async function processGmailNewMessage(entityId: string, messageData: any): Promise<void> {
   try {
@@ -198,59 +289,52 @@ async function processGmailNewMessage(entityId: string, messageData: any): Promi
     const userId = result.rows[0].user_id;
 
     // Create service container for this user
+    // ServiceFactory will return ComposioGmailService (based on USE_COMPOSIO=true)
     const services = ServiceFactory.createForUser(userId, entityId);
-    const gmail = await services.getGmailService();
+    const gmail = await services.getGmailService() as IGmailService;
+    const responseService = await services.getResponseService();
+    const aiService = services.getAIService();
 
-    // Fetch the full email details
-    const email = await gmail.getEmailByMessageId(messageData.messageId);
+    // Create shared pipeline instance with dependencies
+    const pipeline = new EmailWebhookPipeline({
+      intelligentRouter: new IntelligentEmailRouter(responseService),
+      aiService: aiService,
+      emailModel: new EmailModel(),
+      promotionalEmailModel: new PromotionalEmailModel()
+    });
 
-    if (!email) {
-      logger.warn({
-        userId: sanitizeUserId(userId),
-        messageId: messageData.messageId
-      }, 'webhook.composio.gmail.email_not_found');
-      return;
-    }
+    // 🎯 CRITICAL: Transform Composio webhook data to EmailMessage format
+    // Composio webhooks already contain the full email - no need to fetch from API!
+    const emailMessage = transformComposioWebhookToEmailMessage(messageData);
 
-    // Parse and save email
-    const parsedEmail = gmail.parseEmail(email);
-    const emailModel = new EmailModel();
+    logger.info({
+      userId: sanitizeUserId(userId),
+      messageId: messageData.messageId,
+      skipApiFetch: true
+    }, 'webhook.composio.gmail.using_webhook_data');
 
-    // Check if email already exists
-    const exists = await emailModel.emailExists(parsedEmail.id, userId);
+    // Build notification object compatible with shared pipeline
+    const notification: WebhookNotification = {
+      messageId: messageData.messageId,
+      emailAddress: undefined // Composio provides user_id directly, no need for email lookup
+    };
 
-    if (!exists) {
-      const emailDbId = await emailModel.saveEmail(parsedEmail, userId);
+    // 🚀 Process through shared pipeline with pre-fetched email
+    // This uses ALL the sophisticated logic from legacy system:
+    // - webhook_processed check
+    // - Smart filtering (no-reply, newsletters)
+    // - AI classification
+    // - Atomic database operations
+    // - IntelligentEmailRouter
+    // - Batch processing with concurrency limits
+    //
+    // By passing emailMessage, we skip the API call and use the webhook data directly
+    await pipeline.processNotification(notification, userId, gmail, emailMessage);
 
-      logger.info({
-        userId: sanitizeUserId(userId),
-        emailId: parsedEmail.id,
-        emailDbId
-      }, 'webhook.composio.gmail.email_saved');
-
-      // Route through intelligent email router
-      if (emailDbId) {
-        const responseService = await services.getResponseService();
-        const intelligentRouter = new IntelligentEmailRouter(responseService);
-
-        const routingResult = await intelligentRouter.routeEmail(
-          parsedEmail,
-          userId,
-          emailDbId
-        );
-
-        logger.info({
-          userId: sanitizeUserId(userId),
-          route: routingResult.routingDecision.route,
-          confidence: routingResult.routingDecision.confidence
-        }, 'webhook.composio.gmail.routed');
-      }
-    } else {
-      logger.debug({
-        userId: sanitizeUserId(userId),
-        emailId: parsedEmail.id
-      }, 'webhook.composio.gmail.email_exists');
-    }
+    logger.info({
+      userId: sanitizeUserId(userId),
+      messageId: messageData.messageId
+    }, 'webhook.composio.gmail.processed');
 
   } catch (error) {
     logger.error({
