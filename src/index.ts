@@ -52,6 +52,7 @@ import multer from 'multer';
 import { google } from 'googleapis';
 import { authMiddleware, getUserId } from './middleware/auth';
 import authRoutes from './routes/auth';
+import composioRoutes from './routes/composio.routes';
 
 const app = express();
 const port = env.PORT;
@@ -181,6 +182,9 @@ app.use('/', healthRoutes);
 
 // Auth routes with rate limiting
 app.use('/api/auth', authRateLimit, authRoutes);
+
+// Composio integration routes (requires authentication)
+app.use('/api/integrations', authMiddleware.authenticate, composioRoutes);
 
 // OAuth routes (separate from API auth routes)
 app.get('/auth', (req, res) => {

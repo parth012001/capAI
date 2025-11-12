@@ -12,6 +12,8 @@ import DashboardPage from './pages/DashboardPage';
 import SearchPage from './pages/SearchPage';
 import VoiceSearchPage from './pages/VoiceSearchPage';
 import SystemStatusPage from './pages/SystemStatusPage';
+import IntegrationsPage from './pages/IntegrationsPage';
+import IntegrationCallbackPage from './pages/IntegrationCallbackPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsOfUsePage from './pages/TermsOfUsePage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -116,6 +118,32 @@ function AppContent() {
 						element={
 							<ProtectedRoute>
 								<DashboardPage />
+							</ProtectedRoute>
+						}
+					/>
+
+					{/* Integrations */}
+					<Route
+						path="/integrations"
+						element={
+							<ProtectedRoute>
+								<IntegrationsPage />
+							</ProtectedRoute>
+						}
+					/>
+					<Route
+						path="/integrations/success"
+						element={
+							<ProtectedRoute>
+								<IntegrationCallbackPage />
+							</ProtectedRoute>
+						}
+					/>
+					<Route
+						path="/integrations/error"
+						element={
+							<ProtectedRoute>
+								<IntegrationCallbackPage />
 							</ProtectedRoute>
 						}
 					/>
