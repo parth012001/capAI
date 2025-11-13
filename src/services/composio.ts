@@ -180,21 +180,30 @@ export class ComposioService {
     query?: string;
   }): Promise<any> {
     try {
-      const result: any = await this.composio.actions.execute({
-        actionName: 'GMAIL_FETCH_EMAILS',
-        requestBody: {
-          entityId: userId,
-          input: {
+      // FIXED: Use tools.execute() instead of actions.execute()
+      // API changed from actionName+requestBody to slug+config pattern
+      const result: any = await this.composio.tools.execute(
+        'GMAIL_FETCH_EMAILS',
+        {
+          userId: userId,  // Changed from entityId
+          arguments: {     // Changed from input
             maxResults: params?.maxResults || 50,
             query: params?.query || ''
-          }
+          },
+          dangerouslySkipVersionCheck: true  // Skip version check for now
         }
-      });
+      );
 
       logger.info({
         userId: sanitizeUserId(userId),
-        emailCount: Array.isArray(result.data?.messages) ? result.data.messages.length : 0
+        emailCount: Array.isArray(result.data?.messages) ? result.data.messages.length : 0,
+        successful: result.successful
       }, 'composio.gmail.emails.fetched');
+
+      // Return data if successful, throw if not
+      if (!result.successful) {
+        throw new Error(result.error || 'Failed to fetch emails');
+      }
 
       return result.data;
     } catch (error) {
@@ -216,11 +225,12 @@ export class ComposioService {
     bcc?: string;
   }): Promise<{ id: string; threadId: string }> {
     try {
-      const result: any = await this.composio.actions.execute({
-        actionName: 'GMAIL_SEND_EMAIL',
-        requestBody: {
-          entityId: userId,
-          input: {
+      // FIXED: Use tools.execute() instead of actions.execute()
+      const result: any = await this.composio.tools.execute(
+        'GMAIL_SEND_EMAIL',
+        {
+          userId: userId,  // Changed from entityId
+          arguments: {     // Changed from input
             to: params.to,
             subject: params.subject,
             body: params.body,
@@ -228,15 +238,21 @@ export class ComposioService {
             references: params.references,
             cc: params.cc,
             bcc: params.bcc
-          }
+          },
+          dangerouslySkipVersionCheck: true  // Skip version check for now
         }
-      });
+      );
 
       logger.info({
         userId: sanitizeUserId(userId),
         emailId: result.data?.id,
-        threadId: result.data?.threadId
+        threadId: result.data?.threadId,
+        successful: result.successful
       }, 'composio.gmail.email.sent');
+
+      if (!result.successful) {
+        throw new Error(result.error || 'Failed to send email');
+      }
 
       return {
         id: result.data?.id || '',
@@ -258,24 +274,31 @@ export class ComposioService {
     subject: string;
   }): Promise<{ id: string; threadId: string }> {
     try {
-      const result: any = await this.composio.actions.execute({
-        actionName: 'GMAIL_REPLY_TO_THREAD',
-        requestBody: {
-          entityId: userId,
-          input: {
+      // FIXED: Use tools.execute() instead of actions.execute()
+      const result: any = await this.composio.tools.execute(
+        'GMAIL_REPLY_TO_THREAD',
+        {
+          userId: userId,  // Changed from entityId
+          arguments: {     // Changed from input
             thread_id: params.threadId,
             body: params.body,
             to: params.to,
             subject: params.subject
-          }
+          },
+          dangerouslySkipVersionCheck: true  // Skip version check for now
         }
-      });
+      );
 
       logger.info({
         userId: sanitizeUserId(userId),
         threadId: params.threadId,
-        emailId: result.data?.id
+        emailId: result.data?.id,
+        successful: result.successful
       }, 'composio.gmail.reply.sent');
+
+      if (!result.successful) {
+        throw new Error(result.error || 'Failed to reply to thread');
+      }
 
       return {
         id: result.data?.id || '',
@@ -297,22 +320,29 @@ export class ComposioService {
     maxResults?: number;
   }): Promise<any[]> {
     try {
-      const result: any = await this.composio.actions.execute({
-        actionName: 'GOOGLECALENDAR_LIST_EVENTS',
-        requestBody: {
-          entityId: userId,
-          input: {
+      // FIXED: Use tools.execute() instead of actions.execute()
+      const result: any = await this.composio.tools.execute(
+        'GOOGLECALENDAR_LIST_EVENTS',
+        {
+          userId: userId,  // Changed from entityId
+          arguments: {     // Changed from input
             timeMin: params.timeMin.toISOString(),
             timeMax: params.timeMax.toISOString(),
             maxResults: params.maxResults || 100
-          }
+          },
+          dangerouslySkipVersionCheck: true  // Skip version check for now
         }
-      });
+      );
 
       logger.info({
         userId: sanitizeUserId(userId),
-        eventCount: Array.isArray(result.data?.items) ? result.data.items.length : 0
+        eventCount: Array.isArray(result.data?.items) ? result.data.items.length : 0,
+        successful: result.successful
       }, 'composio.calendar.events.fetched');
+
+      if (!result.successful) {
+        throw new Error(result.error || 'Failed to list calendar events');
+      }
 
       return result.data?.items || [];
     } catch (error) {
@@ -333,25 +363,32 @@ export class ComposioService {
     location?: string;
   }): Promise<{ id: string; htmlLink: string }> {
     try {
-      const result: any = await this.composio.actions.execute({
-        actionName: 'GOOGLECALENDAR_CREATE_EVENT',
-        requestBody: {
-          entityId: userId,
-          input: {
+      // FIXED: Use tools.execute() instead of actions.execute()
+      const result: any = await this.composio.tools.execute(
+        'GOOGLECALENDAR_CREATE_EVENT',
+        {
+          userId: userId,  // Changed from entityId
+          arguments: {     // Changed from input
             summary: params.summary,
             start: { dateTime: params.start.toISOString() },
             end: { dateTime: params.end.toISOString() },
             attendees: params.attendees?.map(email => ({ email })),
             description: params.description,
             location: params.location
-          }
+          },
+          dangerouslySkipVersionCheck: true  // Skip version check for now
         }
-      });
+      );
 
       logger.info({
         userId: sanitizeUserId(userId),
-        eventId: result.data?.id
+        eventId: result.data?.id,
+        successful: result.successful
       }, 'composio.calendar.event.created');
+
+      if (!result.successful) {
+        throw new Error(result.error || 'Failed to create calendar event');
+      }
 
       return {
         id: result.data?.id || '',
@@ -393,19 +430,17 @@ export class ComposioService {
   }
 
   async getAvailableActions(integrationId: string): Promise<string[]> {
-    try {
-      const actions: any = await this.composio.actions.list({
-        apps: integrationId
-      });
+    // DEPRECATED: The SDK v0.2.4 doesn't have a public method to list tools by app
+    // The tools.list() method doesn't exist in the SDK
+    // This method is not used in production code, so returning empty array
+    logger.warn({
+      integrationId
+    }, 'composio.actions.list.deprecated');
 
-      return Array.isArray(actions.items) ? actions.items.map((action: any) => action.name) : [];
-    } catch (error) {
-      logger.error({
-        integrationId,
-        error: error instanceof Error ? error.message : String(error)
-      }, 'composio.actions.list.failed');
-      throw error;
-    }
+    return [];
+
+    // TODO: If needed in future, use the toolkits API or check SDK documentation
+    // for the correct way to list available tools for an integration
   }
 }
 

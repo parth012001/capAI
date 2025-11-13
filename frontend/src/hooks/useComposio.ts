@@ -52,7 +52,8 @@ export function useConnectGmail() {
       alert('Gmail connected successfully!');
     },
     onError: (error: any) => {
-      alert(`Failed to connect Gmail: ${error.message}`);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Connection failed';
+      alert(`Failed to connect Gmail: ${errorMessage}`);
     }
   });
 }
@@ -91,7 +92,8 @@ export function useConnectCalendar() {
       alert('Calendar connected successfully!');
     },
     onError: (error: any) => {
-      alert(`Failed to connect Calendar: ${error.message}`);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Connection failed';
+      alert(`Failed to connect Calendar: ${errorMessage}`);
     }
   });
 }
