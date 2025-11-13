@@ -20,75 +20,79 @@ export function useComposioStatus() {
 
 /**
  * Hook to initiate Gmail connection via Composio
- * Opens OAuth in popup and polls for connection completion
+ * Opens OAuth in popup and waits for connection completion using Composio SDK
  */
 export function useConnectGmail() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => composioService.connectGmail(),
-    onSuccess: (data) => {
-      if (data.redirectUrl) {
-        // Open Composio OAuth in popup
-        const popup = window.open(data.redirectUrl, 'composio-oauth', 'width=600,height=700');
+    mutationFn: async () => {
+      // Step 1: Initiate connection to get redirect URL and connection request ID
+      const { redirectUrl, connectionRequestId } = await composioService.connectGmail();
 
-        // Poll for connection status
-        const pollInterval = setInterval(async () => {
-          try {
-            const status = await composioService.getUserStatus();
-            if (status.connectedAccountId) {
-              // Connection successful!
-              clearInterval(pollInterval);
-              popup?.close();
-              queryClient.invalidateQueries({ queryKey: ['composio-status'] });
-              alert('Gmail connected successfully!');
-            }
-          } catch (error) {
-            // Continue polling
-          }
-        }, 2000); // Poll every 2 seconds
+      // Step 2: Open OAuth popup
+      const popup = window.open(redirectUrl, 'composio-oauth', 'width=600,height=700');
 
-        // Stop polling after 2 minutes
-        setTimeout(() => clearInterval(pollInterval), 120000);
+      // Step 3: Wait for connection completion (backend uses Composio SDK's waitForConnection)
+      try {
+        const result = await composioService.waitForConnection(connectionRequestId);
+
+        // Close popup on success
+        popup?.close();
+
+        return result;
+      } catch (error) {
+        popup?.close();
+        throw error;
       }
     },
+    onSuccess: () => {
+      // Invalidate queries to refresh UI
+      queryClient.invalidateQueries({ queryKey: ['composio-status'] });
+      alert('Gmail connected successfully!');
+    },
+    onError: (error: any) => {
+      alert(`Failed to connect Gmail: ${error.message}`);
+    }
   });
 }
 
 /**
  * Hook to initiate Calendar connection via Composio
- * Opens OAuth in popup and polls for connection completion
+ * Opens OAuth in popup and waits for connection completion using Composio SDK
  */
 export function useConnectCalendar() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: () => composioService.connectCalendar(),
-    onSuccess: (data) => {
-      if (data.redirectUrl) {
-        // Open Composio OAuth in popup
-        const popup = window.open(data.redirectUrl, 'composio-oauth', 'width=600,height=700');
+    mutationFn: async () => {
+      // Step 1: Initiate connection to get redirect URL and connection request ID
+      const { redirectUrl, connectionRequestId } = await composioService.connectCalendar();
 
-        // Poll for connection status
-        const pollInterval = setInterval(async () => {
-          try {
-            const status = await composioService.getUserStatus();
-            if (status.connectedAccountId) {
-              // Connection successful!
-              clearInterval(pollInterval);
-              popup?.close();
-              queryClient.invalidateQueries({ queryKey: ['composio-status'] });
-              alert('Calendar connected successfully!');
-            }
-          } catch (error) {
-            // Continue polling
-          }
-        }, 2000); // Poll every 2 seconds
+      // Step 2: Open OAuth popup
+      const popup = window.open(redirectUrl, 'composio-oauth', 'width=600,height=700');
 
-        // Stop polling after 2 minutes
-        setTimeout(() => clearInterval(pollInterval), 120000);
+      // Step 3: Wait for connection completion (backend uses Composio SDK's waitForConnection)
+      try {
+        const result = await composioService.waitForConnection(connectionRequestId);
+
+        // Close popup on success
+        popup?.close();
+
+        return result;
+      } catch (error) {
+        popup?.close();
+        throw error;
       }
     },
+    onSuccess: () => {
+      // Invalidate queries to refresh UI
+      queryClient.invalidateQueries({ queryKey: ['composio-status'] });
+      alert('Calendar connected successfully!');
+    },
+    onError: (error: any) => {
+      alert(`Failed to connect Calendar: ${error.message}`);
+    }
   });
 }
 

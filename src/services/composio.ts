@@ -24,7 +24,7 @@ export class ComposioService {
 
   async initiateGmailConnection(userId: string): Promise<{
     redirectUrl: string;
-    connectionId?: string;
+    connectionRequestId: string;
   }> {
     try {
       const connectionRequest = await this.composio.connectedAccounts.link(
@@ -34,12 +34,13 @@ export class ComposioService {
 
       logger.info({
         userId: sanitizeUserId(userId),
+        connectionRequestId: connectionRequest.id,
         redirectUrl: connectionRequest.redirectUrl
       }, 'composio.gmail.connection.initiated');
 
       return {
-        redirectUrl: connectionRequest.redirectUrl,
-        connectionId: undefined
+        redirectUrl: connectionRequest.redirectUrl!,
+        connectionRequestId: connectionRequest.id
       };
     } catch (error: any) {
       logger.error({
@@ -52,7 +53,7 @@ export class ComposioService {
 
   async initiateCalendarConnection(userId: string): Promise<{
     redirectUrl: string;
-    connectionId?: string;
+    connectionRequestId: string;
   }> {
     try {
       const connectionRequest = await this.composio.connectedAccounts.link(
@@ -62,18 +63,71 @@ export class ComposioService {
 
       logger.info({
         userId: sanitizeUserId(userId),
+        connectionRequestId: connectionRequest.id,
         redirectUrl: connectionRequest.redirectUrl
       }, 'composio.calendar.connection.initiated');
 
       return {
-        redirectUrl: connectionRequest.redirectUrl,
-        connectionId: undefined
+        redirectUrl: connectionRequest.redirectUrl!,
+        connectionRequestId: connectionRequest.id
       };
     } catch (error: any) {
       logger.error({
         userId: sanitizeUserId(userId),
         error: error?.response?.data || error.message
       }, 'composio.calendar.connection.initiate.failed');
+      throw error;
+    }
+  }
+
+  /**
+   * Wait for OAuth connection to complete
+   * This method blocks until the user completes OAuth (or timeout)
+   * Uses Composio SDK's built-in waitForConnection which handles polling internally
+   *
+   * @param connectionRequestId - The connection request ID from link()
+   * @param userId - User ID to update in database after completion
+   * @param timeoutMs - Optional timeout in milliseconds (default: 120000 = 2 minutes)
+   * @returns Connected account details
+   */
+  async waitForConnectionCompletion(
+    connectionRequestId: string,
+    userId: string,
+    timeoutMs: number = 120000
+  ): Promise<{
+    connectedAccountId: string;
+    status: string;
+  }> {
+    try {
+      logger.info({
+        userId: sanitizeUserId(userId),
+        connectionRequestId,
+        timeoutMs
+      }, 'composio.connection.waiting');
+
+      // Wait for OAuth completion using connectedAccounts.waitForConnection()
+      // This method handles polling internally
+      const connectedAccount = await this.composio.connectedAccounts.waitForConnection(
+        connectionRequestId,
+        timeoutMs
+      );
+
+      logger.info({
+        userId: sanitizeUserId(userId),
+        connectedAccountId: connectedAccount.id,
+        status: connectedAccount.status
+      }, 'composio.connection.completed');
+
+      return {
+        connectedAccountId: connectedAccount.id,
+        status: connectedAccount.status
+      };
+    } catch (error: any) {
+      logger.error({
+        userId: sanitizeUserId(userId),
+        connectionRequestId,
+        error: error instanceof Error ? error.message : String(error)
+      }, 'composio.connection.wait.failed');
       throw error;
     }
   }
@@ -96,6 +150,27 @@ export class ComposioService {
         connectionId,
         error: error instanceof Error ? error.message : String(error)
       }, 'composio.connection.status.failed');
+      throw error;
+    }
+  }
+
+  async getConnectedAccountsForUser(userId: string): Promise<any[]> {
+    try {
+      const accounts: any = await this.composio.connectedAccounts.list({
+        entityId: userId
+      });
+
+      logger.info({
+        userId: sanitizeUserId(userId),
+        accountCount: Array.isArray(accounts?.items) ? accounts.items.length : 0
+      }, 'composio.accounts.listed');
+
+      return Array.isArray(accounts?.items) ? accounts.items : [];
+    } catch (error) {
+      logger.error({
+        userId: sanitizeUserId(userId),
+        error: error instanceof Error ? error.message : String(error)
+      }, 'composio.accounts.list.failed');
       throw error;
     }
   }

@@ -3,7 +3,7 @@ import { api } from './api';
 export interface ComposioConnectionResponse {
   success: boolean;
   redirectUrl: string;
-  connectionId?: string;
+  connectionRequestId: string;
 }
 
 export interface ComposioStatusResponse {
@@ -62,6 +62,14 @@ export const composioService = {
    */
   getConnectionStatus: async (connectionId: string): Promise<ComposioConnectionStatusResponse> => {
     const response = await api.get(`/api/integrations/status/${connectionId}`);
+    return response.data;
+  },
+
+  /**
+   * Wait for connection completion
+   */
+  waitForConnection: async (connectionRequestId: string) => {
+    const response = await api.post(`/api/integrations/connection/wait/${connectionRequestId}`);
     return response.data;
   },
 

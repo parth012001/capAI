@@ -76,17 +76,17 @@ router.post('/gmail/connect', async (req: Request, res: Response) => {
     }
 
     // Initiate Gmail connection
-    const { redirectUrl, connectionId } = await composioService.initiateGmailConnection(userId);
+    const { redirectUrl, connectionRequestId } = await composioService.initiateGmailConnection(userId);
 
     logger.info({
       userId: sanitizeUserId(userId),
-      connectionId
+      connectionRequestId
     }, 'composio.gmail.connect.initiated');
 
     res.json({
       success: true,
       redirectUrl,
-      connectionId
+      connectionRequestId
     });
   } catch (error: any) {
     logger.error({
@@ -130,17 +130,17 @@ router.post('/calendar/connect', async (req: Request, res: Response) => {
     }
 
     // Initiate Calendar connection
-    const { redirectUrl, connectionId } = await composioService.initiateCalendarConnection(userId);
+    const { redirectUrl, connectionRequestId } = await composioService.initiateCalendarConnection(userId);
 
     logger.info({
       userId: sanitizeUserId(userId),
-      connectionId
+      connectionRequestId
     }, 'composio.calendar.connect.initiated');
 
     res.json({
       success: true,
       redirectUrl,
-      connectionId
+      connectionRequestId
     });
   } catch (error: any) {
     logger.error({
@@ -159,9 +159,67 @@ router.post('/calendar/connect', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/integrations/connection/wait/:connectionRequestId
+ * Wait for OAuth connection to complete and update database
+ * This endpoint blocks until user completes OAuth (uses Composio SDK's waitForConnection)
+ */
+router.post('/connection/wait/:connectionRequestId', async (req: Request, res: Response) => {
+  try {
+    const { connectionRequestId } = req.params;
+    const userId = req.userId!;
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      connectionRequestId
+    }, 'composio.connection.wait.request');
+
+    // Wait for OAuth completion (this blocks until complete or timeout)
+    const { connectedAccountId, status } = await composioService.waitForConnectionCompletion(
+      connectionRequestId,
+      userId
+    );
+
+    // Update database with connected account details
+    await queryWithRetry(
+      `UPDATE user_gmail_tokens
+       SET composio_connected_account_id = $1,
+           composio_connected_at = NOW(),
+           auth_method = 'composio',
+           migration_status = 'completed'
+       WHERE user_id = $2`,
+      [connectedAccountId, userId]
+    );
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      connectedAccountId,
+      status
+    }, 'composio.connection.wait.completed');
+
+    res.json({
+      success: true,
+      connectedAccountId,
+      status
+    });
+  } catch (error: any) {
+    logger.error({
+      userId: sanitizeUserId(req.userId!),
+      connectionRequestId: req.params.connectionRequestId,
+      error: error instanceof Error ? error.message : String(error)
+    }, 'composio.connection.wait.failed');
+
+    res.status(500).json({
+      error: 'Failed to wait for connection',
+      message: error.message
+    });
+  }
+});
+
+/**
  * GET /api/integrations/callback
  * Handle OAuth callback from Composio after user completes connection
  * Query params: connection_status, connectedAccountId
+ * NOTE: This is now deprecated in favor of waitForConnection approach
  */
 router.get('/callback', async (req: Request, res: Response) => {
   try {
@@ -293,6 +351,110 @@ router.get('/user/status', async (req: Request, res: Response) => {
 
     res.status(500).json({
       error: 'Failed to get user integration status',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/integrations/sync
+ * Sync connected accounts from Composio API to database
+ * This fetches the actual connected account IDs from Composio and updates the database
+ */
+router.post('/sync', async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    logger.info({
+      userId: sanitizeUserId(userId)
+    }, 'composio.sync.request');
+
+    // Fetch all connected accounts for this user from Composio
+    const accounts = await composioService.getConnectedAccountsForUser(userId);
+
+    if (!accounts || accounts.length === 0) {
+      logger.warn({
+        userId: sanitizeUserId(userId)
+      }, 'composio.sync.no.accounts');
+
+      return res.json({
+        success: true,
+        message: 'No connected accounts found in Composio',
+        accounts: []
+      });
+    }
+
+    // Find the most recent active Gmail and Calendar connections
+    const gmailAccounts = accounts.filter((acc: any) =>
+      acc.toolkit?.slug === 'gmail' && acc.status === 'ACTIVE'
+    ).sort((a: any, b: any) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const calendarAccounts = accounts.filter((acc: any) =>
+      acc.toolkit?.slug === 'googlecalendar' && acc.status === 'ACTIVE'
+    ).sort((a: any, b: any) =>
+      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const latestGmail = gmailAccounts[0];
+    const latestCalendar = calendarAccounts[0];
+
+    // Update database with the most recent connected account ID
+    const connectedAccountId = latestGmail?.id || latestCalendar?.id;
+
+    if (connectedAccountId) {
+      await queryWithRetry(
+        `UPDATE user_gmail_tokens
+         SET composio_connected_account_id = $1,
+             composio_connected_at = NOW(),
+             auth_method = 'composio',
+             migration_status = 'completed'
+         WHERE user_id = $2`,
+        [connectedAccountId, userId]
+      );
+
+      logger.info({
+        userId: sanitizeUserId(userId),
+        connectedAccountId,
+        gmailAccounts: gmailAccounts.length,
+        calendarAccounts: calendarAccounts.length
+      }, 'composio.sync.completed');
+
+      res.json({
+        success: true,
+        message: 'Connected accounts synced successfully',
+        connectedAccountId,
+        accounts: {
+          gmail: gmailAccounts.map((a: any) => ({ id: a.id, status: a.status, createdAt: a.createdAt })),
+          calendar: calendarAccounts.map((a: any) => ({ id: a.id, status: a.status, createdAt: a.createdAt }))
+        }
+      });
+    } else {
+      logger.warn({
+        userId: sanitizeUserId(userId),
+        totalAccounts: accounts.length
+      }, 'composio.sync.no.active.accounts');
+
+      res.json({
+        success: false,
+        message: 'No active Gmail or Calendar accounts found',
+        accounts: accounts.map((a: any) => ({
+          id: a.id,
+          toolkit: a.toolkit?.slug,
+          status: a.status,
+          createdAt: a.createdAt
+        }))
+      });
+    }
+  } catch (error: any) {
+    logger.error({
+      userId: sanitizeUserId(req.userId!),
+      error: error instanceof Error ? error.message : String(error)
+    }, 'composio.sync.failed');
+
+    res.status(500).json({
+      error: 'Failed to sync connected accounts',
       message: error.message
     });
   }
