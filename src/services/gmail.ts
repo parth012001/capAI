@@ -27,6 +27,10 @@ export class GmailService {
 
   getAuthUrl(intent?: string): string {
     const scopes = [
+      'https://www.googleapis.com/auth/userinfo.email',
+      'https://www.googleapis.com/auth/userinfo.profile',
+      // Note: Gmail/Calendar scopes still requested but tokens not saved
+      // Only used for initial OAuth, actual operations use Composio
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.send',
       'https://www.googleapis.com/auth/calendar.readonly',

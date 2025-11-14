@@ -1,4 +1,5 @@
-import { CalendarService, AvailabilityCheck } from './calendar';
+import { ICalendarProvider } from './providers/ICalendarProvider';
+import { AvailabilityCheck } from './calendar';
 
 export interface TimeSlotSuggestion {
   start: string;
@@ -23,16 +24,18 @@ export interface AvailabilityRequest {
 }
 
 export class SmartAvailabilityService {
-  private calendarService: CalendarService;
+  private calendarProvider: ICalendarProvider;
+  private userId: string;
   private defaultBusinessHours: BusinessHours = {
     start: "09:00",
-    end: "17:00", 
+    end: "17:00",
     timezone: "America/Los_Angeles", // PST
     workingDays: [1, 2, 3, 4, 5] // Monday-Friday
   };
 
-  constructor(calendarService: CalendarService) {
-    this.calendarService = calendarService;
+  constructor(calendarProvider: ICalendarProvider, userId: string) {
+    this.calendarProvider = calendarProvider;
+    this.userId = userId;
   }
 
   /**
@@ -44,10 +47,7 @@ export class SmartAvailabilityService {
   ): Promise<TimeSlotSuggestion[]> {
     try {
       console.log(`📅 Generating time slots for ${request.duration}min meeting...`);
-      
-      // Initialize calendar service with user tokens
-      await this.initializeCalendarForUser(userId);
-      
+
       const businessHours = request.businessHours || this.defaultBusinessHours;
       const maxSuggestions = request.maxSuggestions || 3;
       
@@ -87,16 +87,21 @@ export class SmartAvailabilityService {
     userId: string
   ): Promise<AvailabilityCheck> {
     try {
-      // Initialize calendar service with user tokens
-      await this.initializeCalendarForUser(userId);
-      
       const start = new Date(startTime);
       const end = new Date(start.getTime() + (duration * 60 * 1000));
-      
-      return await this.calendarService.checkAvailability(
-        start.toISOString(),
-        end.toISOString()
-      );
+
+      const result = await this.calendarProvider.checkAvailability(this.userId, {
+        start,
+        end
+      });
+
+      // Convert provider format to AvailabilityCheck format
+      return {
+        start: start.toISOString(),
+        end: end.toISOString(),
+        isAvailable: result.available,
+        conflictingEvents: (result.conflicts || []) as any // Type compatibility: provider CalendarEvent vs types CalendarEvent
+      };
     } catch (error) {
       console.error('❌ Error checking specific time slot:', error);
       throw error;
@@ -207,12 +212,12 @@ export class SmartAvailabilityService {
         
         // Check availability for this slot
         try {
-          const availability = await this.calendarService.checkAvailability(
-            slotStart.toISOString(),
-            slotEnd.toISOString()
-          );
-          
-          if (availability.isAvailable) {
+          const availability = await this.calendarProvider.checkAvailability(this.userId, {
+            start: slotStart,
+            end: slotEnd
+          });
+
+          if (availability.available) {
             slots.push({
               start: slotStart.toISOString(),
               end: slotEnd.toISOString(),
@@ -328,29 +333,6 @@ export class SmartAvailabilityService {
     return nextDay;
   }
 
-  /**
-   * Initialize calendar service with user tokens
-   */
-  private async initializeCalendarForUser(userId: string): Promise<void> {
-    try {
-      // Import the token storage service
-      const { TokenStorageService } = await import('./tokenStorage');
-      const tokenStorageService = new TokenStorageService();
-      
-      // Get user credentials
-      const credentials = await tokenStorageService.getDecryptedCredentials(userId);
-      if (!credentials) {
-        throw new Error(`No calendar access tokens found for user: ${userId}`);
-      }
-
-      // Set tokens in calendar service
-      await this.calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
-      
-    } catch (error) {
-      console.error('❌ Error initializing calendar for user:', error);
-      throw error;
-    }
-  }
 
   /**
    * Format time slot for display

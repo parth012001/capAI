@@ -41,6 +41,7 @@ import { MeetingDetectionService } from '../services/meetingDetection';
 import { AutoSchedulingService } from '../services/autoScheduling';
 import { MeetingPipelineService } from '../services/meetingPipeline';
 import { MeetingConfirmationService } from '../services/meetingConfirmation';
+import { MeetingResponseGeneratorService } from '../services/meetingResponseGenerator';
 import { TokenStorageService } from '../services/tokenStorage';
 import { ComposioService } from '../services/composio';
 
@@ -87,6 +88,7 @@ export class ServiceContainer {
   private _autoSchedulingService?: AutoSchedulingService;
   private _meetingPipelineService?: MeetingPipelineService;
   private _meetingConfirmationService?: MeetingConfirmationService;
+  private _meetingResponseGeneratorService?: MeetingResponseGeneratorService;
   private _tokenStorageService?: TokenStorageService;
   private _composioService?: ComposioService;
 
@@ -166,14 +168,14 @@ export class ServiceContainer {
 
   /**
    * Get Response service (with dependencies)
-   * Dependencies: AIService, ContextService, GmailService
+   * Dependencies: AIService, ContextService, IEmailProvider, userId
    */
   async getResponseService(): Promise<ResponseService> {
     if (!this._responseService) {
       const aiService = this.getAIService();
       const contextService = this.getContextService();
-      const gmailService = await this.getGmailService();
-      this._responseService = new ResponseService(aiService, contextService, gmailService);
+      const emailProvider = await this.getEmailProvider();
+      this._responseService = new ResponseService(aiService, contextService, emailProvider, this.userId);
     }
     return this._responseService;
   }
@@ -201,11 +203,13 @@ export class ServiceContainer {
   }
 
   /**
-   * Get Auto Scheduling service
+   * Get Auto Scheduling service (with dependencies)
+   * Dependencies: ICalendarProvider, userId
    */
-  getAutoSchedulingService(): AutoSchedulingService {
+  async getAutoSchedulingService(): Promise<AutoSchedulingService> {
     if (!this._autoSchedulingService) {
-      this._autoSchedulingService = new AutoSchedulingService();
+      const calendarProvider = await this.getCalendarProvider();
+      this._autoSchedulingService = new AutoSchedulingService(calendarProvider, this.userId);
     }
     return this._autoSchedulingService;
   }
@@ -221,13 +225,32 @@ export class ServiceContainer {
   }
 
   /**
-   * Get Meeting Confirmation service
+   * Get Meeting Confirmation service (with dependencies)
+   * Dependencies: ICalendarProvider, userId
    */
-  getMeetingConfirmationService(): MeetingConfirmationService {
+  async getMeetingConfirmationService(): Promise<MeetingConfirmationService> {
     if (!this._meetingConfirmationService) {
-      this._meetingConfirmationService = new MeetingConfirmationService();
+      const calendarProvider = await this.getCalendarProvider();
+      this._meetingConfirmationService = new MeetingConfirmationService(calendarProvider, this.userId);
     }
     return this._meetingConfirmationService;
+  }
+
+  /**
+   * Get Meeting Response Generator service (with dependencies)
+   * Dependencies: ICalendarProvider, IEmailProvider, userId
+   */
+  async getMeetingResponseGeneratorService(): Promise<MeetingResponseGeneratorService> {
+    if (!this._meetingResponseGeneratorService) {
+      const calendarProvider = await this.getCalendarProvider();
+      const emailProvider = await this.getEmailProvider();
+      this._meetingResponseGeneratorService = new MeetingResponseGeneratorService(
+        calendarProvider,
+        emailProvider,
+        this.userId
+      );
+    }
+    return this._meetingResponseGeneratorService;
   }
 
   /**

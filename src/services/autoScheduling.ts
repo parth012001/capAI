@@ -1,8 +1,9 @@
 import { pool } from '../database/connection';
-import { CalendarService } from './calendar';
+import { ICalendarProvider } from './providers/ICalendarProvider';
 import { CalendarModel } from '../models/Calendar';
 import { AIService } from './ai';
 import { MeetingDetectionService, MeetingRequest } from './meetingDetection';
+import { SmartAvailabilityService } from './smartAvailability';
 import { safeParseDate } from '../utils/dateParser';
 import { CalendarEvent, TimeSlotSuggestion } from '../types';
 
@@ -53,12 +54,16 @@ export interface AutoSchedulingPreference {
 }
 
 export class AutoSchedulingService {
-  private calendarService: CalendarService;
+  private calendarProvider: ICalendarProvider;
+  private smartAvailabilityService: SmartAvailabilityService;
   private calendarModel: CalendarModel;
   private aiService: AIService;
+  private userId: string;
 
-  constructor() {
-    this.calendarService = new CalendarService();
+  constructor(calendarProvider: ICalendarProvider, userId: string) {
+    this.calendarProvider = calendarProvider;
+    this.userId = userId;
+    this.smartAvailabilityService = new SmartAvailabilityService(calendarProvider, userId);
     this.calendarModel = new CalendarModel();
     this.aiService = new AIService();
   }
@@ -179,8 +184,16 @@ export class AutoSchedulingService {
         const date = this.parsePreferredDate(dateStr);
         if (!date) continue;
 
-        // Check availability for this date
-        const daySlots = await this.calendarService.suggestTimeSlots(duration, date.toISOString());
+        // Check availability for this date using SmartAvailabilityService
+        const daySlots = await this.smartAvailabilityService.generateTimeSlotSuggestions(
+          {
+            duration: duration,
+            preferredDate: date.toISOString(),
+            maxSuggestions: 3,
+            excludeWeekends: true
+          },
+          this.userId
+        );
         timeSlots.push(...daySlots);
 
         // Limit to top 5 suggestions
@@ -214,26 +227,20 @@ export class AutoSchedulingService {
         throw new Error('Meeting request not found');
       }
 
-      // Create calendar event
-      const calendarEvent: CalendarEvent = {
+      // Create calendar event using provider
+      const createdEvent = await this.calendarProvider.createEvent(this.userId, {
         summary: meetingRequest.subject || 'Meeting',
         description: `Meeting requested by ${meetingRequest.senderEmail}${meetingRequest.specialRequirements ? '\n\nSpecial Requirements: ' + meetingRequest.specialRequirements : ''}`,
-        start: {
-          dateTime: selectedTimeSlot.start,
-        },
-        end: {
-          dateTime: selectedTimeSlot.end,
-        },
+        start: new Date(selectedTimeSlot.start),
+        end: new Date(selectedTimeSlot.end),
         attendees: [
           meetingRequest.senderEmail,
           ...(meetingRequest.attendees || []),
           ...(additionalAttendees || [])
-        ].filter((email, index, arr) => arr.indexOf(email) === index).map(email => ({ email })), // Remove duplicates and format properly
-        location: meetingRequest.locationPreference
-      };
-
-      // Create the actual calendar event
-      const createdEvent = await this.calendarService.createCalendarEvent(calendarEvent);
+        ].filter((email, index, arr) => arr.indexOf(email) === index), // Remove duplicates
+        location: meetingRequest.locationPreference,
+        timeZone: 'America/Los_Angeles' // PST timezone
+      });
 
       // Update meeting request status
       await pool.query(
@@ -256,7 +263,8 @@ export class AutoSchedulingService {
       `, [meetingRequestId]);
 
       console.log(`✅ Meeting scheduled successfully: ${createdEvent.id}`);
-      return createdEvent;
+      // Return as any for type compatibility - caller uses event.id which both types have
+      return createdEvent as any;
 
     } catch (error) {
       console.error('❌ Error confirming scheduling:', error);

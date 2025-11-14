@@ -8,6 +8,9 @@
  * without changing business logic.
  */
 
+// Export ParsedEmail for use by providers
+export type { ParsedEmail };
+
 export interface SendEmailParams {
   to: string;
   subject: string;
@@ -57,6 +60,17 @@ export interface SendEmailResponse {
   labelIds?: string[];
 }
 
+export interface SenderRelationship {
+  totalEmails: number;
+  recentEmails: number;
+  firstInteraction: Date | null;
+  lastInteraction: Date | null;
+  classification: 'stranger' | 'new_contact' | 'known_contact';
+}
+
+// Import ParsedEmail from types to avoid duplication
+import type { ParsedEmail } from '../../types';
+
 /**
  * IEmailProvider Interface
  *
@@ -98,6 +112,46 @@ export interface IEmailProvider {
     userId: string,
     params: ReplyToThreadParams
   ): Promise<SendEmailResponse>;
+
+  /**
+   * Get sender relationship history
+   *
+   * Analyzes email history with a specific sender to determine relationship strength
+   *
+   * @param userId - User identifier
+   * @param senderEmail - Email address of the sender
+   * @returns Promise with relationship data
+   */
+  getSenderRelationshipHistory(
+    userId: string,
+    senderEmail: string
+  ): Promise<SenderRelationship>;
+
+  /**
+   * Get all emails in a thread
+   *
+   * @param userId - User identifier
+   * @param threadId - Gmail thread identifier
+   * @returns Promise with array of parsed emails in thread
+   */
+  getThreadEmails(
+    userId: string,
+    threadId: string
+  ): Promise<ParsedEmail[]>;
+
+  /**
+   * Get recent emails from/to a specific sender
+   *
+   * @param userId - User identifier
+   * @param senderEmail - Email address of the sender
+   * @param maxResults - Maximum number of emails to return (default: 5)
+   * @returns Promise with array of parsed emails
+   */
+  getRecentSenderEmails(
+    userId: string,
+    senderEmail: string,
+    maxResults?: number
+  ): Promise<ParsedEmail[]>;
 
   /**
    * Get provider name (for logging/debugging)

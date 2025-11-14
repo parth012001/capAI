@@ -210,13 +210,14 @@ const events = await calendarProvider.listEvents(userId, {
 
 #### Webhook System
 
-**Current:** Two webhook systems run in parallel
-- **Google Pub/Sub:** `POST /webhooks/gmail` (legacy, can be disabled)
-- **Composio Triggers:** `POST /webhooks/composio` (new system)
+**Current State (Phase 6E Complete):**
+- **Google Pub/Sub:** `POST /webhooks/gmail` - DISABLED (legacy system)
+- **Composio Triggers:** `POST /webhooks/composio` - ACTIVE (primary system)
 
-**Toggle:**
+**Configuration:**
 ```bash
-DISABLE_GOOGLE_WEBHOOKS=true  # Disable Google webhook renewal service
+# Google webhook renewal service is DISABLED by default
+DISABLE_GOOGLE_WEBHOOKS=true  # Set to 'false' to re-enable Google webhooks
 ```
 
 **Key Differences:**

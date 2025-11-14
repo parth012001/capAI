@@ -1,5 +1,4 @@
-import { CalendarService } from './calendar';
-import { GmailService } from './gmail';
+import { ICalendarProvider } from './providers/ICalendarProvider';
 import { SmartAvailabilityService } from './smartAvailability';
 import { pool } from '../database/connection';
 
@@ -28,14 +27,14 @@ export interface CalendarEventCreation {
 }
 
 export class MeetingConfirmationService {
-  private calendarService: CalendarService;
-  private gmailService: GmailService;
+  private calendarProvider: ICalendarProvider;
+  private userId: string;
   private smartAvailabilityService: SmartAvailabilityService;
 
-  constructor() {
-    this.calendarService = new CalendarService();
-    this.gmailService = new GmailService();
-    this.smartAvailabilityService = new SmartAvailabilityService(this.calendarService);
+  constructor(calendarProvider: ICalendarProvider, userId: string) {
+    this.calendarProvider = calendarProvider;
+    this.userId = userId;
+    this.smartAvailabilityService = new SmartAvailabilityService(calendarProvider, userId);
   }
 
   /**
@@ -120,9 +119,6 @@ export class MeetingConfirmationService {
         return { success: false, error: 'Meeting request not found' };
       }
 
-      // Initialize services for user
-      await this.initializeServicesForUser(userId);
-
       // Use provided time slot or the one from confirmation
       const timeSlot = selectedTimeSlot || confirmation.selectedTimeSlot;
       if (!timeSlot) {
@@ -130,12 +126,12 @@ export class MeetingConfirmationService {
       }
 
       // Check availability one more time
-      const availability = await this.calendarService.checkAvailability(
-        timeSlot.start,
-        timeSlot.end
-      );
+      const availability = await this.calendarProvider.checkAvailability(this.userId, {
+        start: new Date(timeSlot.start),
+        end: new Date(timeSlot.end)
+      });
 
-      if (!availability.isAvailable) {
+      if (!availability.available) {
         return { 
           success: false, 
           error: 'Time slot is no longer available. Please select a different time.' 
@@ -143,25 +139,18 @@ export class MeetingConfirmationService {
       }
 
       // Create calendar event
-      const calendarEvent = {
+      const createdEvent = await this.calendarProvider.createEvent(this.userId, {
         summary: meetingRequest.subject || 'Meeting',
         description: `Meeting requested by ${meetingRequest.senderEmail}${meetingRequest.specialRequirements ? '\n\nSpecial Requirements: ' + meetingRequest.specialRequirements : ''}`,
-        start: {
-          dateTime: timeSlot.start,
-          timeZone: 'America/Los_Angeles' // PST timezone
-        },
-        end: {
-          dateTime: timeSlot.end,
-          timeZone: 'America/Los_Angeles' // PST timezone
-        },
+        start: new Date(timeSlot.start),
+        end: new Date(timeSlot.end),
         attendees: [
           meetingRequest.senderEmail,
           ...(meetingRequest.attendees || [])
         ].filter((email, index, arr) => arr.indexOf(email) === index), // Remove duplicates
-        location: meetingRequest.locationPreference
-      };
-
-      const createdEvent = await this.calendarService.createCalendarEvent(calendarEvent);
+        location: meetingRequest.locationPreference,
+        timeZone: 'America/Los_Angeles' // PST timezone
+      });
       
       // Update confirmation status
       await this.updateConfirmationStatus(confirmationId, 'confirmed', createdEvent.id);
@@ -296,8 +285,6 @@ export class MeetingConfirmationService {
         return [];
       }
 
-      await this.initializeServicesForUser(userId);
-
       const suggestions = await this.smartAvailabilityService.generateTimeSlotSuggestions(
         {
           duration: duration,
@@ -322,22 +309,6 @@ export class MeetingConfirmationService {
     }
   }
 
-  /**
-   * Initialize services for user
-   */
-  private async initializeServicesForUser(userId: string): Promise<void> {
-    try {
-      await this.gmailService.initializeForUser(userId);
-      
-      const credentials = await this.gmailService.tokenStorageService.getDecryptedCredentials(userId);
-      if (credentials) {
-        await this.calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
-      }
-    } catch (error) {
-      console.error('❌ Error initializing services for user:', error);
-      throw error;
-    }
-  }
 
   /**
    * Get meeting request details

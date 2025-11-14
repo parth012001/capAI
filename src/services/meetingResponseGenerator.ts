@@ -1,7 +1,8 @@
 import { ParsedEmail } from '../types';
 import { MeetingRequest } from './meetingDetection';
-import { CalendarService, AvailabilityCheck } from './calendar';
-import { GmailService } from './gmail';
+import { AvailabilityCheck } from './calendar';
+import { ICalendarProvider } from './providers/ICalendarProvider';
+import { IEmailProvider } from './providers/IEmailProvider';
 import { SmartAvailabilityService } from './smartAvailability';
 import { pool } from '../database/connection';
 import { safeParseDate, safeParseDateWithValidation } from '../utils/dateParser';
@@ -45,17 +46,19 @@ export interface MeetingResponse {
 }
 
 export class MeetingResponseGeneratorService {
-  private calendarService: CalendarService;
-  private gmailService: GmailService;
+  private calendarProvider: ICalendarProvider;
+  private emailProvider: IEmailProvider;
   private smartAvailabilityService: SmartAvailabilityService;
   private userProfileService: UserProfileService;
   private aiContentService: MeetingAIContentService;
   private aiService: AIService;
+  private userId: string;
 
-  constructor() {
-    this.calendarService = new CalendarService();
-    this.gmailService = new GmailService();
-    this.smartAvailabilityService = new SmartAvailabilityService(this.calendarService);
+  constructor(calendarProvider: ICalendarProvider, emailProvider: IEmailProvider, userId: string) {
+    this.calendarProvider = calendarProvider;
+    this.emailProvider = emailProvider;
+    this.userId = userId;
+    this.smartAvailabilityService = new SmartAvailabilityService(calendarProvider, userId);
     this.userProfileService = new UserProfileService(pool);
     this.aiService = new AIService();
     this.aiContentService = new MeetingAIContentService(this.aiService);
@@ -78,8 +81,8 @@ export class MeetingResponseGeneratorService {
         return this.generateMockResponse(email, meetingRequest, userId);
       }
 
-      // Initialize services for the user
-      await this.initializeServicesForUser(userId);
+      // ✅ COMPOSIO MIGRATION: Services are already initialized via ServiceFactory
+      // No need to initialize - providers are passed in constructor
 
       // Build response context
       const context = await this.buildResponseContext(email, meetingRequest, userId);
@@ -198,7 +201,7 @@ Looking forward to speaking with you!`;
   ): Promise<MeetingResponseContext> {
     try {
       // Get sender relationship context
-      const senderHistory = await this.gmailService.getSenderRelationshipHistory(meetingRequest.senderEmail);
+      const senderHistory = await this.emailProvider.getSenderRelationshipHistory(this.userId, meetingRequest.senderEmail);
       
       // Get user communication tone from database
       const userTone = await this.getUserCommunicationTone(userId);
@@ -216,8 +219,8 @@ Looking forward to speaking with you!`;
           // First, check if email text explicitly mentions a timezone (e.g., "2pm EST")
           const detectedTimezone = TimezoneService.extractTimezoneFromText(preferredDate);
 
-          // Get user's default timezone from calendar service (already initialized)
-          const defaultUserTimezone = this.calendarService.getUserTimezone();
+          // Get user's default timezone from database
+          const defaultUserTimezone = await TimezoneService.getUserTimezone(this.userId);
 
           // Use detected timezone if found, otherwise use user's default timezone
           const userTimezone = detectedTimezone || defaultUserTimezone;
@@ -245,11 +248,11 @@ Looking forward to speaking with you!`;
             const endTime = new Date(timezoneAwareDate.utcDate.getTime() + (duration * 60 * 1000));
 
             // Check availability with timezone-aware dates
-            const availability = await this.calendarService.checkAvailability(
-              timezoneAwareDate.utcDate.toISOString(),
-              endTime.toISOString()
-            );
-            isAvailable = availability.isAvailable;
+            const availability = await this.calendarProvider.checkAvailability(this.userId, {
+              start: timezoneAwareDate.utcDate,
+              end: endTime
+            });
+            isAvailable = availability.available;
             console.log(`📅 Availability check: ${isAvailable ? '✅ Available' : '❌ Conflict found'} for ${preferredDate} (${userTimezone})`);
           }
         } catch (availabilityError) {
@@ -344,7 +347,7 @@ Looking forward to speaking with you!`;
       // CRITICAL: Parse date in USER'S timezone for meeting acceptance
       // First check if email explicitly mentions timezone (e.g., "2pm EST")
       const detectedTimezone = TimezoneService.extractTimezoneFromText(requestedTime);
-      const defaultUserTimezone = this.calendarService.getUserTimezone();
+      const defaultUserTimezone = await TimezoneService.getUserTimezone(this.userId);
       const userTimezone = detectedTimezone || defaultUserTimezone;
 
       if (detectedTimezone) {
@@ -451,7 +454,7 @@ Looking forward to speaking with you!`;
         // First check if email explicitly mentions timezone (e.g., "2pm EST")
         const requestedTime = meetingRequest.preferredDates![0];
         const detectedTimezone = TimezoneService.extractTimezoneFromText(requestedTime);
-        const defaultUserTimezone = this.calendarService.getUserTimezone();
+        const defaultUserTimezone = await TimezoneService.getUserTimezone(this.userId);
         const userTimezone = detectedTimezone || defaultUserTimezone;
 
         if (detectedTimezone) {
@@ -608,11 +611,14 @@ Looking forward to speaking with you!`;
       
       const originalDate = dateParseResult.date;
       const dateStr = originalDate.toISOString().split('T')[0];
-      
-      // Get suggestions for the same day first
-      const suggestions = await this.calendarService.suggestTimeSlots(duration, dateStr);
-      
-      return suggestions.slice(0, 3).map(suggestion => ({
+
+      // Get suggestions for the same day first using SmartAvailabilityService
+      const suggestions = await this.smartAvailabilityService.generateTimeSlotSuggestions(
+        { duration, preferredDate: dateStr, maxSuggestions: 3 },
+        this.userId
+      );
+
+      return suggestions.slice(0, 3).map((suggestion: any) => ({
         start: suggestion.start,
         end: suggestion.end,
         formatted: this.formatDateTime(safeParseDate(suggestion.start) || new Date()),
@@ -1175,143 +1181,7 @@ ${closing}`;
     }
   }
 
-  /**
-   * Initialize Gmail and Calendar services for user
-   * UPDATED: Now includes timezone initialization
-   */
-  private async initializeServicesForUser(userId: string): Promise<void> {
-    try {
-      // Initialize Gmail service first
-      await this.gmailService.initializeForUser(userId);
-
-      // Get user credentials for calendar service with proper validation
-      const credentials = await this.gmailService.tokenStorageService.getDecryptedCredentials(userId);
-
-      if (!credentials) {
-        throw new Error(`No OAuth credentials found for user ${userId}. User needs to authenticate first.`);
-      }
-
-      if (!credentials.accessToken) {
-        throw new Error(`No access token found for user ${userId}. User needs to re-authenticate.`);
-      }
-
-      // Check if tokens appear to be expired (basic validation)
-      if (credentials.accessToken && this.isTokenLikelyExpired(credentials)) {
-        console.log(`⚠️ OAuth tokens may be expired for user ${userId}, attempting refresh...`);
-
-        try{
-          // Attempt to refresh tokens using the calendar service
-          await this.calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
-          
-          // Test the connection to verify tokens work
-          await this.testCalendarConnection();
-          
-        } catch (refreshError) {
-          throw new Error(`OAuth tokens expired and refresh failed for user ${userId}. User needs to re-authenticate. Error: ${refreshError instanceof Error ? refreshError.message : 'Unknown refresh error'}`);
-        }
-      } else {
-        // Tokens appear valid, set them up
-        await this.calendarService.setStoredTokens(credentials.accessToken, credentials.refreshToken);
-
-        // Test the connection to make sure everything works
-        try {
-          await this.testCalendarConnection();
-        } catch (connectionError) {
-          throw new Error(`OAuth tokens invalid for user ${userId}. Calendar connection failed. User needs to re-authenticate. Error: ${connectionError instanceof Error ? connectionError.message : 'Connection test failed'}`);
-        }
-      }
-
-      // CRITICAL: Initialize calendar service with user timezone
-      // This ensures all date parsing and event creation uses the correct timezone
-      console.log(`🌍 [TIMEZONE] Initializing calendar service with user timezone...`);
-      await this.calendarService.initializeForUser(userId);
-
-      console.log(`✅ OAuth services initialized successfully for user ${userId}`);
-      
-    } catch (error) {
-      console.error(`❌ Error initializing OAuth services for user ${userId}:`, error);
-      
-      // Provide helpful error messages for different OAuth failure scenarios
-      if (error instanceof Error) {
-        if (error.message.includes('No OAuth credentials')) {
-          console.error('💡 Solution: User needs to go through OAuth flow first');
-        } else if (error.message.includes('expired') || error.message.includes('invalid')) {
-          console.error('💡 Solution: User needs to re-authenticate (tokens expired/invalid)');
-        } else if (error.message.includes('refresh failed')) {
-          console.error('💡 Solution: User needs to complete OAuth flow again');
-        }
-      }
-      
-      throw error;
-    }
-  }
-  
-  /**
-   * Basic check to see if tokens might be expired based on timestamp
-   */
-  private isTokenLikelyExpired(credentials: any): boolean {
-    try {
-      // If we have an expiry date, check it
-      if (credentials.expiry_date) {
-        const now = Date.now();
-        const expiry = typeof credentials.expiry_date === 'number' 
-          ? credentials.expiry_date 
-          : parseInt(credentials.expiry_date);
-        
-        // Consider tokens expired if they expire within the next 5 minutes
-        return (expiry - now) < (5 * 60 * 1000);
-      }
-      
-      // If no expiry info, assume tokens might need refresh if they're old
-      // This is a heuristic - not perfect but better than no check
-      return false;
-    } catch {
-      // If we can't determine expiry, assume they might be expired
-      return true;
-    }
-  }
-  
-  /**
-   * Test calendar connection to validate OAuth tokens
-   */
-  private async testCalendarConnection(): Promise<void> {
-    try {
-      // Simple test: try to check calendar health (minimal API call)
-      await this.calendarService.checkCalendarHealth();
-    } catch (error) {
-      throw new Error(`Calendar connection test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  /**
-   * Health check for response generator service
-   */
-  async healthCheck(): Promise<{
-    status: string;
-    calendarReady: boolean;
-    gmailReady: boolean;
-    responseCapacity: string;
-  }> {
-    try {
-      // Test calendar service
-      const calendarHealth = await this.calendarService.checkCalendarHealth();
-      
-      // Test database connection
-      await pool.query('SELECT 1');
-      
-      return {
-        status: 'healthy',
-        calendarReady: calendarHealth.status === 'healthy',
-        gmailReady: true, // Gmail is initialized per-user
-        responseCapacity: 'ready'
-      };
-    } catch (error) {
-      return {
-        status: 'error',
-        calendarReady: false,
-        gmailReady: false,
-        responseCapacity: 'limited'
-      };
-    }
-  }
+  // ✅ COMPOSIO MIGRATION: Old Google API initialization methods removed
+  // Services now use provider interfaces (IEmailProvider, ICalendarProvider)
+  // which are initialized via ServiceFactory per-request
 }

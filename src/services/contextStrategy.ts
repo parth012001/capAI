@@ -1,4 +1,4 @@
-import { GmailService } from './gmail';
+import { IEmailProvider } from './providers/IEmailProvider';
 import { ContextService } from './context';
 import { ParsedEmail } from '../types';
 
@@ -19,12 +19,14 @@ export interface GatheredContext {
 }
 
 export class ContextStrategyService {
-  private gmailService: GmailService;
+  private emailProvider: IEmailProvider;
   private contextService: ContextService;
+  private userId: string;
 
-  constructor(gmailService: GmailService, contextService: ContextService) {
-    this.gmailService = gmailService;
+  constructor(emailProvider: IEmailProvider, contextService: ContextService, userId: string) {
+    this.emailProvider = emailProvider;
     this.contextService = contextService;
+    this.userId = userId;
   }
 
   // Determine the best context gathering strategy for a response request
@@ -32,8 +34,8 @@ export class ContextStrategyService {
     try {
       console.log(`🎯 Determining context strategy for ${recipientEmail}...`);
 
-      // Step 1: Gmail relationship discovery
-      const relationship = await this.gmailService.getSenderRelationshipHistory(recipientEmail);
+      // Step 1: Email relationship discovery via provider
+      const relationship = await this.emailProvider.getSenderRelationshipHistory(this.userId, recipientEmail);
       
       // Step 2: Check if this is part of an existing thread
       const hasThread = threadId && threadId.length > 0;
@@ -97,7 +99,7 @@ export class ContextStrategyService {
       };
 
       // Always get basic sender relationship info
-      gatheredContext.senderRelationship = await this.gmailService.getSenderRelationshipHistory(recipientEmail);
+      gatheredContext.senderRelationship = await this.emailProvider.getSenderRelationshipHistory(this.userId, recipientEmail);
       gatheredContext.sources.push('sender_relationship');
 
       switch (strategy.strategy) {
@@ -150,7 +152,7 @@ export class ContextStrategyService {
     // If part of thread, get thread history
     if (threadId) {
       try {
-        context.threadHistory = await this.gmailService.getThreadEmails(threadId);
+        context.threadHistory = await this.emailProvider.getThreadEmails(this.userId, threadId);
         context.sources.push('thread_history');
         
         context.contextSummary = `New contact with existing conversation thread (${context.threadHistory.length} messages). ` +
@@ -181,7 +183,7 @@ export class ContextStrategyService {
     // If part of thread, get complete thread history
     if (threadId) {
       try {
-        context.threadHistory = await this.gmailService.getThreadEmails(threadId);
+        context.threadHistory = await this.emailProvider.getThreadEmails(this.userId, threadId);
         context.sources.push('thread_history');
       } catch (error) {
         console.warn('⚠️ Could not fetch thread history:', error);
@@ -190,7 +192,7 @@ export class ContextStrategyService {
 
     // Always get recent sender history for known contacts
     try {
-      context.senderHistory = await this.gmailService.getRecentSenderEmails(recipientEmail, 8);
+      context.senderHistory = await this.emailProvider.getRecentSenderEmails(this.userId, recipientEmail, 8);
       context.sources.push('sender_history');
     } catch (error) {
       console.warn('⚠️ Could not fetch sender history:', error);

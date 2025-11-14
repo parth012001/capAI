@@ -133,6 +133,44 @@ export class TokenStorageService {
   }
 
   /**
+   * Create user profile without saving Google OAuth tokens
+   * Used during Composio migration - user signs in with Google OAuth but
+   * will connect Gmail/Calendar via Composio
+   *
+   * @param gmailAddress - User's Gmail address from OAuth
+   * @returns userId
+   */
+  async createUserWithPendingComposio(gmailAddress: string): Promise<string> {
+    try {
+      const userId = this.generateUserId(gmailAddress);
+
+      console.log(`💾 Creating user profile (pending Composio): ${gmailAddress}`);
+
+      const query = `
+        INSERT INTO user_gmail_tokens (
+          user_id, gmail_address, auth_method, webhook_active
+        ) VALUES ($1, $2, 'pending_composio', false)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+          auth_method = 'pending_composio',
+          webhook_active = false,
+          updated_at = NOW()
+        RETURNING user_id
+      `;
+
+      const values = [userId, gmailAddress];
+
+      const result = await queryWithRetry(query, values);
+      console.log(`✅ User profile created (pending Composio): ${userId}`);
+
+      return userId;
+    } catch (error) {
+      console.error('❌ Error creating user profile:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get user tokens from database for webhook processing
    */
   async getUserTokens(userId: string): Promise<UserTokenData | null> {

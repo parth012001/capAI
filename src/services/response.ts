@@ -1,7 +1,7 @@
 import { AIService } from './ai';
 import { ContextService } from './context';
 import { ContextStrategyService } from './contextStrategy';
-import { GmailService } from './gmail';
+import { IEmailProvider } from './providers/IEmailProvider';
 import { LearningService } from './learning';
 import { pool } from '../database/connection';
 import { PromptTemplateService, ResponseQualityService, PromptContext, QualityScore } from './promptTemplates';
@@ -39,22 +39,24 @@ export class ResponseService {
   private aiService: AIService;
   private contextService: ContextService;
   private contextStrategyService: ContextStrategyService;
-  private gmailService: GmailService;
+  private emailProvider: IEmailProvider;
+  private userId: string;
   private learningService: LearningService;
   private promptTemplateService: PromptTemplateService;
   private responseQualityService: ResponseQualityService;
-  private userProfileService: UserProfileService; // ✅ Add UserProfileService
+  private userProfileService: UserProfileService;
   private urgencyKeywords: UrgencyKeywords;
 
-  constructor(aiService: AIService, contextService: ContextService, gmailService: GmailService) {
+  constructor(aiService: AIService, contextService: ContextService, emailProvider: IEmailProvider, userId: string) {
     this.aiService = aiService;
     this.contextService = contextService;
-    this.gmailService = gmailService;
-    this.contextStrategyService = new ContextStrategyService(this.gmailService, this.contextService);
+    this.emailProvider = emailProvider;
+    this.userId = userId;
+    this.contextStrategyService = new ContextStrategyService(this.emailProvider, this.contextService, this.userId);
     this.learningService = new LearningService(this.aiService);
     this.promptTemplateService = new PromptTemplateService();
     this.responseQualityService = new ResponseQualityService();
-    this.userProfileService = new UserProfileService(pool); // ✅ Initialize UserProfileService
+    this.userProfileService = new UserProfileService(pool);
     this.urgencyKeywords = {
       high: ["urgent", "asap", "today", "deadline", "emergency", "immediately", "critical", "rush", "time-sensitive"],
       medium: ["soon", "this week", "priority", "important", "when possible", "at your convenience"],

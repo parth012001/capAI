@@ -15,6 +15,7 @@ import SystemStatusPage from './pages/SystemStatusPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import IntegrationCallbackPage from './pages/IntegrationCallbackPage';
 import ComposioTestPage from './pages/ComposioTestPage';
+import OnboardingIntegrationsPage from './pages/OnboardingIntegrationsPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsOfUsePage from './pages/TermsOfUsePage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -98,21 +99,30 @@ function AppContent() {
 					<Route path="/auth/callback" element={<AuthCallbackPage />} />
 					
 					{/* Protected routes */}
-					<Route 
-						path="/profile-setup" 
+					{/* Phase 6: Mandatory Composio integration step for new users */}
+					<Route
+						path="/onboarding/integrations"
+						element={
+							<ProtectedRoute>
+								<OnboardingIntegrationsPage />
+							</ProtectedRoute>
+						}
+					/>
+					<Route
+						path="/profile-setup"
 						element={
 							<ProtectedRoute>
 								<ProfileSetupPage />
 							</ProtectedRoute>
-						} 
+						}
 					/>
-					<Route 
-						path="/onboarding" 
+					<Route
+						path="/onboarding"
 						element={
 							<ProtectedRoute>
 								<Onboarding />
 							</ProtectedRoute>
-						} 
+						}
 					/>
 					<Route
 						path="/dashboard"
