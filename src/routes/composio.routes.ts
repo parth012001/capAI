@@ -196,6 +196,37 @@ router.post('/connection/wait/:connectionRequestId', async (req: Request, res: R
       status
     }, 'composio.connection.wait.completed');
 
+    // 🚀 PHASE 5: Auto-setup Gmail trigger after connection
+    // This ensures new emails are automatically monitored via webhook
+    try {
+      const webhookUrl = process.env.COMPOSIO_WEBHOOK_URL ||
+                         'https://chief-production.up.railway.app/webhooks/composio';
+
+      logger.info({
+        userId: sanitizeUserId(userId),
+        webhookUrl
+      }, 'composio.trigger.setup.starting');
+
+      const triggerId = await composioService.setupGmailTrigger(
+        connectedAccountId,
+        webhookUrl
+      );
+
+      logger.info({
+        userId: sanitizeUserId(userId),
+        triggerId,
+        connectedAccountId
+      }, 'composio.trigger.setup.completed');
+    } catch (triggerError: any) {
+      // Don't fail the connection if trigger setup fails
+      // User can still use the system, just without webhooks
+      logger.error({
+        userId: sanitizeUserId(userId),
+        connectedAccountId,
+        error: triggerError instanceof Error ? triggerError.message : String(triggerError)
+      }, 'composio.trigger.setup.failed');
+    }
+
     res.json({
       success: true,
       connectedAccountId,
@@ -421,6 +452,34 @@ router.post('/sync', async (req: Request, res: Response) => {
         calendarAccounts: calendarAccounts.length
       }, 'composio.sync.completed');
 
+      // 🚀 PHASE 5: Auto-setup Gmail trigger after sync (if not already set up)
+      if (latestGmail) {
+        try {
+          const webhookUrl = process.env.COMPOSIO_WEBHOOK_URL ||
+                             'https://chief-production.up.railway.app/webhooks/composio';
+
+          logger.info({
+            userId: sanitizeUserId(userId),
+            webhookUrl
+          }, 'composio.trigger.sync_setup.starting');
+
+          const triggerId = await composioService.setupGmailTrigger(
+            connectedAccountId,
+            webhookUrl
+          );
+
+          logger.info({
+            userId: sanitizeUserId(userId),
+            triggerId
+          }, 'composio.trigger.sync_setup.completed');
+        } catch (triggerError: any) {
+          logger.error({
+            userId: sanitizeUserId(userId),
+            error: triggerError instanceof Error ? triggerError.message : String(triggerError)
+          }, 'composio.trigger.sync_setup.failed');
+        }
+      }
+
       res.json({
         success: true,
         message: 'Connected accounts synced successfully',
@@ -494,6 +553,163 @@ router.post('/test/fetch-emails', async (req: Request, res: Response) => {
 
     res.status(500).json({
       error: 'Failed to fetch emails via Composio',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/integrations/test/send-email
+ * Test endpoint to send email via Composio
+ */
+router.post('/test/send-email', async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { to, subject, body, cc, bcc } = req.body;
+
+    if (!to || !subject || !body) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'to, subject, and body are required'
+      });
+    }
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      to,
+      subject
+    }, 'composio.test.send.request');
+
+    const result = await composioService.sendEmail(userId, {
+      to,
+      subject,
+      body,
+      cc,
+      bcc
+    });
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      emailId: result.id
+    }, 'composio.test.send.success');
+
+    res.json({
+      success: true,
+      result
+    });
+  } catch (error: any) {
+    logger.error({
+      userId: sanitizeUserId(req.userId!),
+      error: error instanceof Error ? error.message : String(error)
+    }, 'composio.test.send.failed');
+
+    res.status(500).json({
+      error: 'Failed to send email via Composio',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/integrations/test/calendar/list
+ * Test endpoint to list calendar events via Composio
+ */
+router.post('/test/calendar/list', async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { timeMin, timeMax, maxResults = 10 } = req.body;
+
+    if (!timeMin || !timeMax) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'timeMin and timeMax are required'
+      });
+    }
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      timeMin,
+      timeMax,
+      maxResults
+    }, 'composio.test.calendar.list.request');
+
+    const events = await composioService.listCalendarEvents(userId, {
+      timeMin: new Date(timeMin),
+      timeMax: new Date(timeMax),
+      maxResults
+    });
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      eventCount: events.length
+    }, 'composio.test.calendar.list.success');
+
+    res.json({
+      success: true,
+      events
+    });
+  } catch (error: any) {
+    logger.error({
+      userId: sanitizeUserId(req.userId!),
+      error: error instanceof Error ? error.message : String(error)
+    }, 'composio.test.calendar.list.failed');
+
+    res.status(500).json({
+      error: 'Failed to list calendar events via Composio',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/integrations/test/calendar/create
+ * Test endpoint to create calendar event via Composio
+ */
+router.post('/test/calendar/create', async (req: Request, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { summary, description, start, end, attendees, location } = req.body;
+
+    if (!summary || !start || !end) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'summary, start, and end are required'
+      });
+    }
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      summary,
+      start,
+      end
+    }, 'composio.test.calendar.create.request');
+
+    const result = await composioService.createCalendarEvent(userId, {
+      summary,
+      description,
+      start: new Date(start),
+      end: new Date(end),
+      attendees,
+      location
+    });
+
+    logger.info({
+      userId: sanitizeUserId(userId),
+      eventId: result.id
+    }, 'composio.test.calendar.create.success');
+
+    res.json({
+      success: true,
+      result
+    });
+  } catch (error: any) {
+    logger.error({
+      userId: sanitizeUserId(req.userId!),
+      error: error instanceof Error ? error.message : String(error)
+    }, 'composio.test.calendar.create.failed');
+
+    res.status(500).json({
+      error: 'Failed to create calendar event via Composio',
       message: error.message
     });
   }

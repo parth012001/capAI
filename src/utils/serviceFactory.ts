@@ -42,6 +42,18 @@ import { AutoSchedulingService } from '../services/autoScheduling';
 import { MeetingPipelineService } from '../services/meetingPipeline';
 import { MeetingConfirmationService } from '../services/meetingConfirmation';
 import { TokenStorageService } from '../services/tokenStorage';
+import { ComposioService } from '../services/composio';
+
+// Import providers
+import {
+  IEmailProvider,
+  ICalendarProvider,
+  ComposioEmailProvider,
+  ComposioCalendarProvider
+} from '../services/providers';
+
+import { queryWithRetry } from '../database/connection';
+import logger, { sanitizeUserId } from './pino-logger';
 
 // Import models (these are stateless and can be shared safely)
 // Note: Using capitalized paths to match actual file names (macOS case-insensitive but git tracks case)
@@ -76,6 +88,11 @@ export class ServiceContainer {
   private _meetingPipelineService?: MeetingPipelineService;
   private _meetingConfirmationService?: MeetingConfirmationService;
   private _tokenStorageService?: TokenStorageService;
+  private _composioService?: ComposioService;
+
+  // Provider layer (abstraction over Gmail/Calendar implementations)
+  private _emailProvider?: IEmailProvider;
+  private _calendarProvider?: ICalendarProvider;
 
   // Shared stateless models (safe to reuse)
   private _emailModel?: EmailModel;
@@ -265,6 +282,92 @@ export class ServiceContainer {
       this._promotionalEmailModel = new PromotionalEmailModel();
     }
     return this._promotionalEmailModel;
+  }
+
+  /**
+   * Get Composio service
+   */
+  getComposioService(): ComposioService {
+    if (!this._composioService) {
+      this._composioService = new ComposioService();
+    }
+    return this._composioService;
+  }
+
+  /**
+   * Get Email Provider (Composio-based)
+   *
+   * Returns the appropriate email provider based on user's auth_method.
+   * Currently returns Composio provider for all users with composio_connected_account_id.
+   */
+  async getEmailProvider(): Promise<IEmailProvider> {
+    if (!this._emailProvider) {
+      // Check user's auth method from database
+      const result = await queryWithRetry(
+        'SELECT auth_method, composio_connected_account_id FROM user_gmail_tokens WHERE user_id = $1',
+        [this.userId]
+      );
+
+      const authMethod = result.rows[0]?.auth_method;
+      const composioConnected = result.rows[0]?.composio_connected_account_id;
+
+      // Use Composio if user has connected via Composio
+      if (composioConnected) {
+        logger.info({
+          userId: sanitizeUserId(this.userId),
+          provider: 'Composio',
+          authMethod
+        }, 'service.provider.email.composio');
+
+        const composioService = this.getComposioService();
+        this._emailProvider = new ComposioEmailProvider(composioService);
+      } else {
+        // For now, throw error - all users should connect via Composio
+        throw new Error(
+          `User ${this.userId} has not connected via Composio. Please connect Gmail first.`
+        );
+      }
+    }
+
+    return this._emailProvider;
+  }
+
+  /**
+   * Get Calendar Provider (Composio-based)
+   *
+   * Returns the appropriate calendar provider based on user's auth_method.
+   * Currently returns Composio provider for all users with composio_connected_account_id.
+   */
+  async getCalendarProvider(): Promise<ICalendarProvider> {
+    if (!this._calendarProvider) {
+      // Check user's auth method from database
+      const result = await queryWithRetry(
+        'SELECT auth_method, composio_connected_account_id FROM user_gmail_tokens WHERE user_id = $1',
+        [this.userId]
+      );
+
+      const authMethod = result.rows[0]?.auth_method;
+      const composioConnected = result.rows[0]?.composio_connected_account_id;
+
+      // Use Composio if user has connected via Composio
+      if (composioConnected) {
+        logger.info({
+          userId: sanitizeUserId(this.userId),
+          provider: 'Composio',
+          authMethod
+        }, 'service.provider.calendar.composio');
+
+        const composioService = this.getComposioService();
+        this._calendarProvider = new ComposioCalendarProvider(composioService);
+      } else {
+        // For now, throw error - all users should connect via Composio
+        throw new Error(
+          `User ${this.userId} has not connected via Composio. Please connect Calendar first.`
+        );
+      }
+    }
+
+    return this._calendarProvider;
   }
 
   /**

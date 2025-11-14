@@ -601,7 +601,7 @@ CREATE TABLE IF NOT EXISTS tone_profiles (
 CREATE TABLE IF NOT EXISTS user_gmail_tokens (
     user_id VARCHAR(255) PRIMARY KEY,
     gmail_address VARCHAR(255) NOT NULL UNIQUE,
-    refresh_token_encrypted TEXT NOT NULL,
+    refresh_token_encrypted TEXT,
     access_token_encrypted TEXT,
     access_token_expires_at TIMESTAMP WITHOUT TIME ZONE,
     webhook_active BOOLEAN DEFAULT true,
@@ -614,7 +614,18 @@ CREATE TABLE IF NOT EXISTS user_gmail_tokens (
     onboarding_completed BOOLEAN DEFAULT false,
     scheduling_link VARCHAR(500),
     scheduling_link_verified BOOLEAN DEFAULT false,
-    scheduling_link_added_at TIMESTAMP WITHOUT TIME ZONE
+    scheduling_link_added_at TIMESTAMP WITHOUT TIME ZONE,
+    -- Timezone fields (added 2025-10)
+    timezone VARCHAR(255) DEFAULT 'America/Los_Angeles',
+    timezone_updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT now(),
+    timezone_source VARCHAR(255) DEFAULT 'google_calendar',
+    -- Composio integration fields (added 2025-11)
+    composio_entity_id VARCHAR(255),
+    composio_connected_account_id VARCHAR(255),
+    composio_connected_at TIMESTAMP WITHOUT TIME ZONE,
+    auth_method VARCHAR(50) DEFAULT 'google_oauth',
+    migration_status VARCHAR(50) DEFAULT 'pending',
+    migrated_at TIMESTAMP WITHOUT TIME ZONE
 );
 
 -- Table: user_preferences

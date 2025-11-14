@@ -14,6 +14,7 @@ import VoiceSearchPage from './pages/VoiceSearchPage';
 import SystemStatusPage from './pages/SystemStatusPage';
 import IntegrationsPage from './pages/IntegrationsPage';
 import IntegrationCallbackPage from './pages/IntegrationCallbackPage';
+import ComposioTestPage from './pages/ComposioTestPage';
 import PrivacyPolicyPage from './pages/PrivacyPolicyPage';
 import TermsOfUsePage from './pages/TermsOfUsePage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -144,6 +145,14 @@ function AppContent() {
 						element={
 							<ProtectedRoute>
 								<IntegrationCallbackPage />
+							</ProtectedRoute>
+						}
+					/>
+					<Route
+						path="/integrations/test"
+						element={
+							<ProtectedRoute>
+								<ComposioTestPage />
 							</ProtectedRoute>
 						}
 					/>

@@ -166,6 +166,127 @@ const result = await queryWithRetry('SELECT * FROM emails WHERE user_id = $1', [
 const result = await pool.query('SELECT * FROM emails WHERE user_id = $1', [userId]);
 ```
 
+### 🚀 Composio Migration (IN PROGRESS - 50% COMPLETE)
+
+**Status:** Backend migration complete (Phases 0-5), frontend pending (Phase 6-7)
+**Documentation:** `.github/issue_composio_migration.md`
+
+#### Overview
+
+The application is migrating from custom Google OAuth to Composio SDK for all Gmail and Calendar operations. This eliminates Google OAuth verification requirements while keeping Google OAuth for initial user authentication.
+
+#### Architecture
+
+**Provider Abstraction Layer** (`src/services/providers/`):
+```
+Request → ServiceFactory → Provider Interface → Composio SDK → Gmail/Calendar API
+```
+
+**Key Interfaces:**
+- `IEmailProvider` - Email operations (fetch, send, reply)
+- `ICalendarProvider` - Calendar operations (list, create, check availability)
+
+**Implementations:**
+- `ComposioEmailProvider` - Composio Gmail integration
+- `ComposioCalendarProvider` - Composio Calendar integration
+
+#### Usage Pattern
+
+```typescript
+// Get providers via ServiceFactory (request-scoped)
+const services = ServiceFactory.createFromRequest(req);
+
+// Email operations
+const emailProvider = await services.getEmailProvider();
+const result = await emailProvider.fetchEmails(userId, { maxResults: 20 });
+
+// Calendar operations
+const calendarProvider = await services.getCalendarProvider();
+const events = await calendarProvider.listEvents(userId, {
+  timeMin: new Date(),
+  timeMax: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+});
+```
+
+#### Webhook System
+
+**Current:** Two webhook systems run in parallel
+- **Google Pub/Sub:** `POST /webhooks/gmail` (legacy, can be disabled)
+- **Composio Triggers:** `POST /webhooks/composio` (new system)
+
+**Toggle:**
+```bash
+DISABLE_GOOGLE_WEBHOOKS=true  # Disable Google webhook renewal service
+```
+
+**Key Differences:**
+- Google: Real-time push, expires every 7 days, requires renewal service
+- Composio: Polling (~60s latency), never expires, auto-managed by Composio
+
+**Automatic Trigger Setup:**
+- Triggers auto-created when user connects via Composio
+- Located in: `src/routes/composio.routes.ts` (connection wait & sync endpoints)
+- Manual bulk setup: `npx tsx scripts/setup-composio-triggers.ts`
+
+#### Migration Status
+
+**✅ Complete (Phases 0-5):**
+- [x] Database schema (all Composio columns exist)
+- [x] Provider abstraction layer (interfaces + implementations)
+- [x] ServiceFactory integration (getEmailProvider/getCalendarProvider)
+- [x] Route handlers updated (5 routes use providers)
+- [x] Webhook system migrated (Composio endpoint created)
+- [x] Automatic trigger setup (on connection)
+
+**🔄 Pending (Phases 6-7):**
+- [ ] Frontend connection UI (force Composio connection after Google OAuth sign-in)
+- [ ] Production deployment and testing
+- [ ] Monitor webhook delivery (24 hours)
+- [ ] Switch fully to Composio webhooks
+
+#### Environment Variables
+
+```bash
+# Composio Configuration (Production)
+COMPOSIO_API_KEY=ak_9ckm0hutPg5atdGFtJEd
+COMPOSIO_GMAIL_AUTH_CONFIG_ID=ac_M2QcFWIKvXv0
+COMPOSIO_CALENDAR_AUTH_CONFIG_ID=ac_k53apWo91X9Y
+COMPOSIO_WEBHOOK_URL=https://chief-production.up.railway.app/webhooks/composio
+
+# Webhook Control
+DISABLE_GOOGLE_WEBHOOKS=false  # Set true after migration complete
+
+# Google OAuth (still used for sign-in)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+```
+
+#### Testing Scripts
+
+```bash
+# Test email provider
+npx tsx scripts/test-email-provider.ts <userId>
+
+# Test calendar provider
+npx tsx scripts/test-calendar-provider.ts <userId>
+
+# Test service factory providers
+npx tsx scripts/test-service-factory-providers.ts <userId>
+
+# Test webhook delivery
+npx tsx scripts/test-composio-webhook.ts <userId>
+
+# Setup triggers for all users
+npx tsx scripts/setup-composio-triggers.ts
+```
+
+#### Important Notes
+
+- **Provider errors:** If user hasn't connected via Composio, providers throw: `"User has not connected via Composio"`
+- **Request scoping:** Providers are request-scoped (isolated per user, no data leakage)
+- **Type safety:** Use `email as any` when passing provider EmailMessage to `gmail.parseEmail()` (type compatibility)
+- **Rollback:** Toggle `DISABLE_GOOGLE_WEBHOOKS=false` to instantly revert to Google webhooks
+
 ### Core Services
 
 **Gmail Integration** (`src/services/gmail.ts`):

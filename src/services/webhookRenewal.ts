@@ -13,18 +13,31 @@ export class WebhookRenewalService {
   /**
    * Start automatic webhook renewal service
    * Checks every 6 hours for webhooks expiring in the next 24 hours
+   *
+   * 🚀 PHASE 5: Can be disabled via DISABLE_GOOGLE_WEBHOOKS env var when using Composio triggers
    */
   startRenewalService(): void {
-        
+    // Check if Google webhooks are disabled (using Composio triggers instead)
+    if (process.env.DISABLE_GOOGLE_WEBHOOKS === 'true') {
+      logger.info({
+        reason: 'using_composio_triggers'
+      }, 'webhook.renewal.service.disabled');
+      console.log('⚠️  Google webhook renewal service disabled - using Composio triggers');
+      console.log('   To re-enable: set DISABLE_GOOGLE_WEBHOOKS=false');
+      return;  // Don't start renewal service
+    }
+
     logger.info({ intervalHours: 6 }, 'webhook.renewal.service.started');
+    console.log('✅ Google webhook renewal service started (checks every 6 hours)');
+
     // Run immediately on startup
     this.checkAndRenewWebhooks();
-    
+
     // Then run every 6 hours
     this.renewalInterval = setInterval(() => {
       this.checkAndRenewWebhooks();
     }, 6 * 60 * 60 * 1000); // 6 hours in milliseconds
-    
+
       }
 
   /**
